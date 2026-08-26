@@ -10,8 +10,11 @@ const inter = Inter({ subsets: ["latin"] });
 export const metadata: Metadata = {
   title: "Pylkoors Darts",
   description: "The ultimate home bar darts experience.",
+  // ADD THIS icons block:
+  icons: {
+    icon: '/icon.png',
+  },
 };
-
 export default function RootLayout({
   children,
 }: Readonly<{
