@@ -1,5 +1,5 @@
 // lib/engines/fight.ts
-import { Dart } from '../types/schema';
+import { Dart } from '@/types/schema';
 
 export interface FightPlayer {
   id: string;

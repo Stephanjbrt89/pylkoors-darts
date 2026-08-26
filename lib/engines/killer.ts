@@ -1,5 +1,5 @@
 // lib/engines/killer.ts
-import { Dart } from '../types/schema';
+import { Dart } from '@/types/schema';
 
 export type KillerTarget = number | 'D' | 'T' | 'B';
 

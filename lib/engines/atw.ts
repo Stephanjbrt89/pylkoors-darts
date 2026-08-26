@@ -1,5 +1,5 @@
 // lib/engines/atw.ts
-import { Dart } from '../types/schema';
+import { Dart } from '@/types/schema';
 
 export interface ATWPlayerData {
   id: string;

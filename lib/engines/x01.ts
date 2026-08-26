@@ -1,5 +1,5 @@
 // lib/engines/x01.ts
-import { Dart } from '../types/schema';
+import { Dart } from '@/types/schema';
 
 export interface X01State {
   targetScore: number;

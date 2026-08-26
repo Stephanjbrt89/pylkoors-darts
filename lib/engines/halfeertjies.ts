@@ -1,5 +1,5 @@
 // lib/engines/halfeertjies.ts
-import { Dart } from '../types/schema';
+import { Dart } from '@/types/schema';
 
 export type HalfeertjiesTarget = number | 'ANY_TRIPLE' | 'ANY_DOUBLE' | 'BULL' | 'TARGET_SCORE';
 

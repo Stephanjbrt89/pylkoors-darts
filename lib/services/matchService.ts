@@ -1,6 +1,6 @@
 // lib/services/matchService.ts
 import { supabase } from '../supabase';
-import { Dart } from '../../types/schema';
+import { Dart } from '@/types/schema';
 
 export const MatchService = {
   // 1. Create a new Match in the DB linked to a specific Player

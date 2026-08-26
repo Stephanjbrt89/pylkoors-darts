@@ -12,6 +12,7 @@ import { GameInfo } from '@/components/GameInfo';
 import { ReactionOverlay } from '@/components/ReactionOverlay';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { StatsService } from '@/lib/services/statsService';
 
 export default function HalfeertjiesPage() {
   const [matchId, setMatchId] = useState<string | null>(null);

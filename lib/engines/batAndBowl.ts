@@ -1,5 +1,5 @@
 // lib/engines/batAndBowl.ts
-import { Dart } from '../types/schema';
+import { Dart } from '@/types/schema';
 
 export type BatBowlRole = 'batting' | 'bowling' | 'pending_bull_choice' | 'diddling';
 
