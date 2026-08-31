@@ -10,6 +10,8 @@ export interface KillerPlayerData {
   score: number;
   hits: Record<string, number>;
   diddle_score: number | null;
+  totalDarts: number;
+  effectiveDarts: number;
 }
 
 export interface KillerState {
@@ -20,7 +22,6 @@ export interface KillerState {
   winnerId: string | null;
   difficulty: 'EASY' | 'HARD';
   phase: 'DIDDLE' | 'PLAY';
-  // If a hit can go in two places, we pause for user choice
   pendingChoice: { dart: Dart; options: string[] } | null;
 }
 
@@ -34,6 +35,8 @@ export const KillerEngine = {
       avatar_url: p.avatar_url,
       score: 0,
       diddle_score: null,
+      totalDarts: 0,
+      effectiveDarts: 0,
       hits: KILLER_TARGETS.reduce((acc, target) => ({ ...acc, [target.toString()]: 0 }), {})
     })),
     currentTurnIndex: 0,
@@ -41,24 +44,23 @@ export const KillerEngine = {
     isFinished: false,
     winnerId: null,
     difficulty,
-    phase: 'DIDDLE',
+    // AUTO-SKIP DIDDLE IF SOLO
+    phase: players.length === 1 ? 'PLAY' : 'DIDDLE',
     pendingChoice: null
   }),
 
-  // Helper to calculate available options for a dart
   getTargetOptions: (state: KillerState, dart: Dart): string[] => {
     const options: string[] = [];
     const val = dart.score;
-    const isTargetRange = val >= 10 && val <= 20;
+    const isTargetRange = (val >= 10 && val <= 20);
+    const isBull = val === 25;
 
-    // Option A: The Number itself
     if (isTargetRange) options.push(val.toString());
-    if (val === 25) options.push('B');
+    if (isBull) options.push('B');
 
-    // Option B: The Multiplier row (D or T)
-    const isEasy = state.difficulty === 'EASY';
-    if (dart.multiplier === 2 && (isEasy || isTargetRange)) options.push('D');
-    if (dart.multiplier === 3 && (isEasy || isTargetRange)) options.push('T');
+    const canUseMultiplierRow = state.difficulty === 'EASY' || isTargetRange;
+    if (dart.multiplier === 2 && canUseMultiplierRow) options.push('D');
+    if (dart.multiplier === 3 && canUseMultiplierRow) options.push('T');
 
     return options;
   },
@@ -80,7 +82,6 @@ export const KillerEngine = {
       return newState;
     }
 
-    // Check for Overlap Choice
     const options = KillerEngine.getTargetOptions(newState, dart);
     if (options.length > 1) {
       newState.pendingChoice = { dart, options };
@@ -91,26 +92,28 @@ export const KillerEngine = {
   },
 
   applyHit: (state: KillerState, dart: Dart, chosenTarget: string | null): KillerState => {
-    const newState = { ...state, pendingChoice: null };
-    const currentPlayer = newState.players[state.currentTurnIndex];
-    const opponent = newState.players.find(p => p.id !== currentPlayer.id)!;
+    const newState = { ...state, pendingChoice: null, players: state.players.map(p => ({ ...p, hits: { ...p.hits } })) };
+    const currentPlayer = newState.players[newState.currentTurnIndex];
+    
+    currentPlayer.totalDarts += 1;
 
     if (chosenTarget) {
-      // Logic: Multiplier only applies if hitting the specific number row
-      // If hitting 'D' or 'T' rows, it's always just 1 mark per dart
+      currentPlayer.effectiveDarts += 1;
       const isMultiplierRow = chosenTarget === 'D' || chosenTarget === 'T';
       const marksToAdd = isMultiplierRow ? 1 : dart.multiplier;
 
       for (let i = 0; i < marksToAdd; i++) {
         if (currentPlayer.hits[chosenTarget] < 3) {
           currentPlayer.hits[chosenTarget]++;
-        } else if (opponent.hits[chosenTarget] < 3) {
-          // SCORING: Points = face value of segment hit (only for 10-20 and Bull)
-          if (dart.score >= 10 && dart.score <= 20) {
-            currentPlayer.score += dart.score;
-          } else if (dart.score === 25) {
-            currentPlayer.score += 25;
-          }
+        } else {
+            // SOLO SCORING: If alone, you can score points on anything you've opened
+            const isSolo = newState.players.length === 1;
+            const anyOpponentOpen = newState.players.some(p => p.id !== currentPlayer.id && p.hits[chosenTarget] < 3);
+            
+            if (isSolo || anyOpponentOpen) {
+                if (dart.score >= 10 && dart.score <= 20) currentPlayer.score += dart.score;
+                else if (dart.score === 25) currentPlayer.score += 25;
+            }
         }
       }
     }
@@ -123,9 +126,12 @@ export const KillerEngine = {
       newState.dartsThrown = newDarts;
     }
 
-    // WIN CONDITION: All 14 closed AND score >= opponent
     const allClosed = KILLER_TARGETS.every(t => currentPlayer.hits[t.toString()] >= 3);
-    if (allClosed && currentPlayer.score >= opponent.score) {
+    
+    // WIN CONDITION: If solo, just close all. If multi, score must be highest.
+    const hasHighestScore = newState.players.every(p => currentPlayer.score >= p.score);
+    
+    if (allClosed && (newState.players.length === 1 || hasHighestScore)) {
       newState.isFinished = true;
       newState.winnerId = currentPlayer.id;
     }

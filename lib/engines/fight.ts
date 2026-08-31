@@ -4,10 +4,13 @@ import { Dart } from '@/types/schema';
 export interface FightPlayer {
   id: string;
   username: string;
-  avatar_url: string; // Changed from avatar to avatar_url
+  avatar_url: string;
   lives: number;
   sectors: number[];
   isEliminated: boolean;
+  // --- STAT TRACKING ---
+  totalDarts: number;
+  effectiveDarts: number;
 }
 
 export interface FightState {
@@ -16,7 +19,11 @@ export interface FightState {
   dartsThrown: Dart[];
   isFinished: boolean;
   winnerId: string | null;
-  lastAction: { type: 'DAMAGE' | 'HEAL' | 'MISS'; targetId: string | null } | null;
+  lastAction: { 
+    type: 'DAMAGE' | 'HEAL' | 'MISS'; 
+    targetId: string | null; 
+    value: number;
+  } | null;
   phase: 'ASSIGNING' | 'PLAY';
 }
 
@@ -25,10 +32,12 @@ export const FightEngine = {
     players: players.map((p) => ({
       id: p.id,
       username: p.username,
-      avatar_url: p.avatar_url, // Standardized
+      avatar_url: p.avatar_url,
       lives: 9,
       sectors: [],
-      isEliminated: false
+      isEliminated: false,
+      totalDarts: 0,
+      effectiveDarts: 0
     })),
     currentTurnIndex: 0,
     dartsThrown: [],
@@ -41,21 +50,29 @@ export const FightEngine = {
   handleThrow: (state: FightState, dart: Dart): FightState => {
     if (state.isFinished) return state;
 
-    const newState = { ...state, players: state.players.map(p => ({ ...p })) };
+    const newState = { ...state, players: state.players.map(p => ({ ...p, sectors: [...p.sectors] })) };
     const currentPlayer = newState.players[newState.currentTurnIndex];
-    let action: FightState['lastAction'] = { type: 'MISS', targetId: null };
+    let action: FightState['lastAction'] = { type: 'MISS', targetId: null, value: 0 };
+
+    // 1. TRACK TOTAL THROWS
+    currentPlayer.totalDarts += 1;
 
     const hitPlayer = newState.players.find(p => p.sectors.includes(dart.score) && !p.isEliminated);
 
     if (hitPlayer) {
+      // 2. TRACK EFFECTIVE THROWS (Hit or Heal)
+      currentPlayer.effectiveDarts += 1;
+
       if (hitPlayer.id === currentPlayer.id) {
-        if (currentPlayer.lives < 9) {
-          currentPlayer.lives = Math.min(9, currentPlayer.lives + 1);
-          action = { type: 'HEAL', targetId: currentPlayer.id };
-        }
+        const oldLives = currentPlayer.lives;
+        currentPlayer.lives = Math.min(9, currentPlayer.lives + dart.multiplier);
+        const gained = currentPlayer.lives - oldLives;
+        if (gained > 0) action = { type: 'HEAL', targetId: currentPlayer.id, value: gained };
       } else {
+        const oldLives = hitPlayer.lives;
         hitPlayer.lives = Math.max(0, hitPlayer.lives - dart.multiplier);
-        action = { type: 'DAMAGE', targetId: hitPlayer.id };
+        const lost = oldLives - hitPlayer.lives;
+        action = { type: 'DAMAGE', targetId: hitPlayer.id, value: lost };
         if (hitPlayer.lives === 0) hitPlayer.isEliminated = true;
       }
     }

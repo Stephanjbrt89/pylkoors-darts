@@ -55,7 +55,8 @@ export const HalfeertjiesEngine = {
       currentTurnIndex: 0,
       dartsThrown: [],
       targets,
-      phase: 'DIDDLE',
+      // SOLO FIX: Skip diddle if only 1 player
+      phase: players.length === 1 ? 'PLAY' : 'DIDDLE',
       winnerId: null
     };
   },

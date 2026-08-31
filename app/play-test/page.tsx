@@ -11,30 +11,24 @@ import { GameInfo } from '@/components/GameInfo';
 import { SquadSelect } from '@/components/SquadSelect';
 import { ReactionOverlay } from '@/components/ReactionOverlay';
 import { NewRecordModal } from '@/components/NewRecordModal';
+import { ArcadeNumpad } from '@/components/ArcadeNumpad';
 import { Dart } from '@/types/schema';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
 export default function X01PlayTest() {
-  // --- 1. HOOKS (MUST BE AT THE TOP) ---
   const [matchId, setMatchId] = useState<string | null>(null);
   const [activePlayers, setActivePlayers] = useState<any[]>([]);
   const [currentTurnIndex, setCurrentTurnIndex] = useState(0);
   const [scores, setScores] = useState<Record<string, number>>({});
   const [dartsThrown, setDartsThrown] = useState<Dart[]>([]);
   const [isWin, setIsWin] = useState(false);
-  
   const [showSquadSelect, setShowSquadSelect] = useState(true);
   const [reactionUrl, setReactionUrl] = useState<string | null>(null);
   const [isShaking, setIsShaking] = useState(false);
-  
-  // World Record Tracking
   const [dartCount, setDartCount] = useState(0);
   const [recordData, setRecordData] = useState<any>(null);
-  
   const router = useRouter();
-
-  // --- 2. LOGIC FUNCTIONS ---
 
   const triggerHype = (cat: 'BOOM' | 'WINNER' | 'RECORD') => {
     setIsShaking(true);
@@ -46,32 +40,22 @@ export default function X01PlayTest() {
     setShowSquadSelect(false);
     setActivePlayers(selectedPlayers);
     setDartCount(0);
-    
     try {
       const id = await MatchService.createMatch(selectedPlayers[0].id);
       setMatchId(id);
-      
       const initialScores: Record<string, number> = {};
-      selectedPlayers.forEach(p => {
-        initialScores[p.id] = 501;
-      });
+      selectedPlayers.forEach(p => { initialScores[p.id] = 501; });
       setScores(initialScores);
-    } catch (err) {
-      console.error(err);
-      alert("Database Connection Error");
-    }
+    } catch (err) { console.error(err); }
   };
 
   const handleThrow = async (score: number, multiplier: number, label: string) => {
     if (!matchId || isWin) return;
-
     const currentPlayer = activePlayers[currentTurnIndex];
     const currentScore = scores[currentPlayer.id];
     const dart: Dart = { score, multiplier, raw: label };
-    
     const willWin = X01Engine.checkWin(currentScore, dart, true);
     const willBust = X01Engine.checkBust(currentScore, dart, true);
-
     const newDarts = [...dartsThrown, dart];
     const currentTotalDarts = dartCount + 1;
     setDartCount(currentTotalDarts);
@@ -79,24 +63,15 @@ export default function X01PlayTest() {
     if (willWin) {
       setIsWin(true);
       setScores(prev => ({ ...prev, [currentPlayer.id]: 0 }));
-      
-      // Check for records
       const isDartsRecord = await StatsService.updateRecord('X01_501', 'FEWEST_DARTS', currentPlayer.id, currentTotalDarts, matchId);
-      const isCheckoutRecord = await StatsService.updateRecord('X01_501', 'HIGHEST_CHECKOUT', currentPlayer.id, score * multiplier, matchId);
-
-      if (isDartsRecord || isCheckoutRecord) {
+      if (isDartsRecord) {
         SoundService.play('record');
         triggerHype('RECORD');
-        setRecordData({ 
-          type: isDartsRecord ? 'FEWEST_DARTS' : 'HIGHEST_CHECKOUT', 
-          value: isDartsRecord ? currentTotalDarts : score * multiplier, 
-          name: currentPlayer.username 
-        });
+        setRecordData({ type: 'FEWEST_DARTS', value: currentTotalDarts, name: currentPlayer.username });
       } else {
         SoundService.play('win');
         triggerHype('WINNER');
       }
-      
       await MatchService.finishMatch(matchId, currentPlayer.id);
     } 
     else if (willBust) {
@@ -107,16 +82,11 @@ export default function X01PlayTest() {
       setCurrentTurnIndex((currentTurnIndex + 1) % activePlayers.length);
     } 
     else {
-      const dartValue = X01Engine.getDartValue(dart);
-      setScores(prev => ({ ...prev, [currentPlayer.id]: prev[currentPlayer.id] - dartValue }));
+      setScores(prev => ({ ...prev, [currentPlayer.id]: prev[currentPlayer.id] - (score * multiplier) }));
       setDartsThrown(newDarts);
-
       if (newDarts.length === 3) {
         const turnTotal = newDarts.reduce((s, d) => s + (d.score * d.multiplier), 0);
-        if (turnTotal === 180) {
-          SoundService.play('180');
-          triggerHype('BOOM');
-        }
+        if (turnTotal === 180) { SoundService.play('180'); triggerHype('BOOM'); }
         await MatchService.saveVisit(matchId, currentPlayer.id, newDarts, false);
         setDartsThrown([]);
         setCurrentTurnIndex((currentTurnIndex + 1) % activePlayers.length);
@@ -124,85 +94,75 @@ export default function X01PlayTest() {
     }
   };
 
-  // --- 3. RENDER GATES ---
-
-  if (showSquadSelect) {
-    return (
-      <div className="relative min-h-screen bg-black">
-        <SquadSelect gameName="X01 Classic" onStart={handleStartGame} onCancel={() => router.push('/')} />
-        <div className="fixed bottom-10 right-10 z-[1000]">
-          <GameInfo title="X01" color="#2563eb" rules={["Reach exactly 0.", "Finish on a DOUBLE.", "Fewest darts sets the record."]} />
-        </div>
-      </div>
-    );
-  }
+  if (showSquadSelect) return <SquadSelect gameName="X01 Classic" onStart={handleStartGame} onCancel={() => router.push('/')} />;
+  if (!matchId) return null;
 
   const activeUser = activePlayers[currentTurnIndex];
 
   return (
-    <main className={`min-h-screen bg-[#050505] text-white p-6 flex flex-col items-center transition-all ${isShaking ? 'animate-shake' : ''}`}>
+    <main className={`h-screen w-full grid grid-rows-[auto_1fr_min-content] bg-[#020205] text-white overflow-hidden relative transition-all duration-500 ${isShaking ? 'animate-shake' : ''}`}>
       
-      <div className="w-full max-w-6xl flex justify-between items-center mb-8">
-        <Link href="/" className="text-[10px] font-black bg-slate-900 border border-slate-800 px-6 py-2 rounded-full uppercase hover:bg-red-600">Quit</Link>
-        <div className="text-center">
-            <h1 className="text-4xl font-black italic tracking-tighter text-white uppercase">X01 Classic</h1>
-            <p className="text-blue-500 font-bold text-[10px] tracking-[0.4em] uppercase">Dart Count: {dartCount}</p>
-        </div>
-        <div className="w-20" />
-      </div>
-
-      {/* Scoreboard */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 w-full max-w-6xl mb-12">
-        {activePlayers.map((p, idx) => (
-          <div key={p.id} className={`p-6 rounded-[2rem] border-4 transition-all duration-500 ${idx === currentTurnIndex && !isWin ? 'border-blue-600 bg-blue-900/10 shadow-2xl scale-105' : 'border-slate-900 opacity-40'}`}>
-            <div className="flex items-center gap-3 mb-4">
-              <img src={p.avatar_url} className="w-10 h-10 rounded-full border border-white/20" alt="" />
-              <p className="font-black uppercase italic text-xs truncate">{p.username}</p>
-            </div>
-            <p className="text-6xl font-black tabular-nums">{scores[p.id]}</p>
+      {/* 1. TOP HUD (Scoreboard) */}
+      <div className="w-full bg-black/40 border-b border-white/5 p-6 z-20 shrink-0">
+        <div className="max-w-[1800px] mx-auto flex justify-between items-center gap-8">
+          <Link href="/" className="bg-slate-900 border border-slate-700 px-6 py-2 rounded-full text-[10px] font-black uppercase hover:bg-red-600 transition shrink-0">QUIT</Link>
+          
+          {/* LARGE AVATAR SCORECARDS */}
+          <div className="flex-grow flex justify-center gap-4 overflow-x-auto no-scrollbar">
+            {activePlayers.map((p, idx) => (
+              <div key={p.id} className={`flex items-center gap-4 px-6 py-3 rounded-2xl border-2 transition-all duration-500 min-w-[220px] ${idx === currentTurnIndex && !isWin ? 'border-blue-500 bg-blue-900/20 shadow-[0_0_20px_rgba(59,130,246,0.3)] scale-105' : 'border-slate-800 bg-slate-900/40 opacity-60'}`}>
+                <img src={p.avatar_url} className="w-16 h-16 rounded-full border-2 border-white/20 object-cover shadow-lg" alt="" />
+                <div>
+                  <p className="text-[10px] font-black uppercase text-blue-400 tracking-widest leading-none mb-1">{p.username}</p>
+                  <p className="text-4xl font-black tabular-nums tracking-tighter">{scores[p.id]}</p>
+                </div>
+              </div>
+            ))}
           </div>
-        ))}
+
+          <div className="shrink-0"><GameInfo title="X01" color="#2563eb" rules={["Reach exactly 0.", "Finish on a DOUBLE.", "Fewest darts sets the record."]} /></div>
+        </div>
       </div>
 
-      {/* Center Stage */}
-      <div className="flex-grow flex flex-col items-center justify-center text-center">
+      {/* 2. THE STAGE (Giant Score Display) */}
+      <div className="relative z-10 flex flex-col items-center justify-center text-center px-10">
         {!isWin ? (
-          <div className="animate-in fade-in zoom-in">
-            <p className="text-slate-500 font-black uppercase tracking-[0.5em] mb-4 text-xs italic">Waiting for {activeUser?.username}</p>
-            <div className="text-[12rem] leading-none font-black italic text-white drop-shadow-[0_0_30px_rgba(255,255,255,0.2)]">
+          <div className="animate-in fade-in zoom-in duration-500">
+            <p className="text-slate-500 font-black uppercase tracking-[0.5em] mb-4 text-xs italic">Waiting for Gooi...</p>
+            <div className="text-[15rem] leading-none font-black italic text-white drop-shadow-[0_0_50px_rgba(59,130,246,0.4)] tabular-nums">
                 {scores[activeUser?.id]}
+            </div>
+            <div className="mt-8 flex flex-col items-center">
+                <p className="text-blue-500 font-black uppercase tracking-[0.4em] text-sm mb-1">{activeUser?.username}</p>
+                <p className="text-slate-600 font-bold text-[10px] uppercase">Session Darts: {dartCount}</p>
             </div>
           </div>
         ) : (
           <div className="animate-bounce">
-            <h2 className="text-8xl font-black text-green-500 italic uppercase">Game Over</h2>
+            <h2 className="text-9xl font-black text-green-500 italic uppercase tracking-tighter">FINISH!</h2>
           </div>
         )}
       </div>
 
+      {/* 3. ARCADE CONSOLE (Fixed Bottom) */}
       {!isWin && (
-        <div className="w-full max-w-md bg-slate-900/90 p-8 rounded-t-[4rem] border-t-4 border-blue-600 shadow-2xl mt-8 backdrop-blur-md">
-            <div className="flex gap-2 justify-center mb-6 h-10">
-                {dartsThrown.map((d, i) => (<div key={i} className="bg-blue-600 px-5 py-2 rounded-full font-black italic text-xs animate-in zoom-in">{d.raw}</div>))}
-                {[...Array(3 - dartsThrown.length)].map((_, i) => (<div key={i} className="w-10 h-10 border-2 border-slate-800 rounded-full" />))}
-            </div>
-            <div className="grid grid-cols-3 gap-3">
-                <button onClick={() => handleThrow(20, 3, 'T20')} className="bg-red-600 p-5 rounded-2xl font-black text-sm">T20</button>
-                <button onClick={() => handleThrow(20, 1, 'S20')} className="bg-slate-800 p-5 rounded-2xl font-black text-sm">S20</button>
-                <button onClick={() => handleThrow(20, 2, 'D20')} className="bg-blue-600 p-5 rounded-2xl font-black text-sm">D20</button>
-                <button onClick={() => handleThrow(25, 2, 'DB')} className="col-span-3 bg-white text-black p-4 rounded-2xl font-black text-sm uppercase italic">Bullseye</button>
-            </div>
+        <div className="w-full flex justify-center z-30 pb-0 shrink-0">
+          <ArcadeNumpad 
+            activeGooierName={activeUser?.username || "Gooier"}
+            dartsThrownCount={dartsThrown.length}
+            onThrow={(score, multiplier, label) => handleThrow(score, multiplier, label)}
+            onEndTurn={() => {
+                setDartsThrown([]);
+                setCurrentTurnIndex((currentTurnIndex + 1) % activePlayers.length);
+            }}
+            color="#2563eb"
+          />
         </div>
       )}
 
-      {/* OVERLAYS */}
+      {/* Winner Modal & Reaction Overlays */}
       <ReactionOverlay url={reactionUrl} onFinished={() => setReactionUrl(null)} />
-      <NewRecordModal 
-        show={!!recordData} 
-        type={recordData?.type} 
-        value={recordData?.value} 
-        playerName={recordData?.name} 
-      />
+      <NewRecordModal show={!!recordData} type={recordData?.type} value={recordData?.value} playerName={recordData?.name} />
     </main>
   );
 }

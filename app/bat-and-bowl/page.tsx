@@ -1,15 +1,16 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { BatAndBowlEngine, BatAndBowlState } from '../../lib/engines/batAndBowl';
-import { ArcadeService } from '../../lib/services/arcadeService';
-import { MatchService } from '../../lib/services/matchService';
-import { SoundService } from '../../lib/services/soundService';
-import { GifService } from '../../lib/services/gifService';
-import { SquadSelect } from '../../components/SquadSelect';
-import { ArcadeLogo } from '../../components/ArcadeLogo';
-import { GameInfo } from '../../components/GameInfo';
-import { ReactionOverlay } from '../../components/ReactionOverlay';
+import { BatAndBowlEngine, BatAndBowlState } from '@/lib/engines/batAndBowl';
+import { ArcadeService } from '@/lib/services/arcadeService';
+import { MatchService } from '@/lib/services/matchService';
+import { SoundService } from '@/lib/services/soundService';
+import { GifService } from '@/lib/services/gifService';
+import { SquadSelect } from '@/components/SquadSelect';
+import { ArcadeLogo } from '@/components/ArcadeLogo';
+import { GameInfo } from '@/components/GameInfo';
+import { ArcadeNumpad } from '@/components/ArcadeNumpad';
+import { ReactionOverlay } from '@/components/ReactionOverlay';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
@@ -39,21 +40,19 @@ export default function BatAndBowlPage() {
     }
   };
 
-  const handleManualHit = async (multiplier: number) => {
+  const onThrow = async (score: number, multiplier: number, label: string) => {
     if (!gameState || !matchId || gameState.phase === 'FINISHED') return;
-    const input = document.getElementById('bbInput') as HTMLInputElement;
-    const score = parseInt(input.value);
-    if (isNaN(score)) return;
-
-    const nextState = BatAndBowlEngine.handleThrow(gameState, { score, multiplier, raw: 'HIT' });
+    
+    const nextState = BatAndBowlEngine.handleThrow(gameState, { score, multiplier, raw: label });
+    
     if (nextState.phase === 'FINISHED') {
         SoundService.play('win');
         setReactionUrl(GifService.getRandomGifUrl('WINNER'));
         if (nextState.winnerId) MatchService.finishMatch(matchId, nextState.winnerId);
     }
+    
     setGameState(nextState);
     await ArcadeService.saveGameState(matchId, nextState);
-    input.value = "";
   };
 
   const setRoles = async (battingId: string) => {
@@ -66,7 +65,7 @@ export default function BatAndBowlPage() {
   };
 
   if (showSquadSelect) return (
-    <div className="relative">
+    <div className="relative min-h-screen bg-black">
       <SquadSelect gameName="Bat & Bowl" minPlayers={1} maxPlayers={2} onStart={handleStartGame} onCancel={() => router.push('/')} />
       <div className="fixed bottom-10 right-10 z-[1000]">
         <GameInfo title="Bat & Bowl" color="#00FF66" rules={["Batsman: Type score 1-20/25 to score runs.","Bowler: Hit targets 1-10 in order to take wickets.","Innings swap at 10 wickets."]} />
@@ -82,99 +81,137 @@ export default function BatAndBowlPage() {
   const currentPlayer = gameState.players[gameState.currentTurnIndex];
 
   return (
-    <main className="min-h-screen bg-[#020617] text-white p-6 flex flex-col items-center">
+    <main className="h-screen w-full grid grid-rows-[60px_1fr_min-content] bg-[#020617] text-white overflow-hidden relative">
       
       {/* 1. Header */}
-      <div className="w-full max-w-6xl flex justify-between items-center mb-8 bg-slate-900/50 p-4 rounded-2xl border border-white/5">
-        <Link href="/" className="text-[10px] font-black bg-black px-6 py-2 rounded-full border border-slate-800">LOBBY</Link>
-        <p className="text-[#00FF66] font-black uppercase text-[10px] tracking-[0.3em]">
-          {gameState.innings === 1 ? 'Innings 1' : `Innings 2 (Target: ${gameState.innings_1_target})`}
+      <div className="w-full flex justify-between items-center px-10 py-2 bg-black/40 border-b border-white/5 z-20">
+        <Link href="/" className="bg-slate-900 border border-slate-700 px-6 py-2 rounded-full text-[10px] font-black uppercase hover:bg-red-600 transition">LOBBY</Link>
+        <p className="text-[#00FF66] font-black uppercase text-[10px] tracking-[0.3em] italic">
+          {gameState.phase === 'DIDDLE' ? 'Selection Phase' : gameState.innings === 1 ? 'Innings 1: Setting Target' : `Innings 2: The Chase`}
         </p>
         <div className="w-20" />
       </div>
 
-      {/* DIDDLE VIEW */}
-      {gameState.phase === 'DIDDLE' && (
-        <div className="flex-grow flex flex-col items-center justify-center animate-in fade-in zoom-in">
-          <h2 className="text-4xl font-black italic mb-12 uppercase tracking-tighter">Diddle For Bull</h2>
-          <div className="flex gap-12">
-            {gameState.players.map((p, i) => (
-                <div key={p.id} className={`p-10 rounded-[3rem] border-4 transition-all ${i === gameState.currentTurnIndex ? 'border-cyan-400 bg-cyan-900/20 shadow-2xl' : 'border-slate-800 opacity-40'}`}>
-                    <img src={p.avatar_url} className="w-24 h-24 rounded-full mb-4 border-2 border-white/20 object-cover bg-black" alt="" />
-                    <p className="text-center font-black uppercase">{p.username}</p>
-                    <p className="text-center text-5xl font-mono mt-4 text-cyan-400">{p.diddle_score ?? '??'}</p>
+      {/* 2. Gameplay Stage */}
+      <div className="relative z-10 flex items-center justify-center p-4 h-full overflow-hidden">
+        
+        {/* PHASE: DIDDLE */}
+        {gameState.phase === 'DIDDLE' && (
+            <div className="flex flex-col items-center animate-in zoom-in">
+                <h2 className="text-4xl font-black italic mb-12 uppercase text-cyan-400">Diddle For Bull</h2>
+                <div className="flex gap-12">
+                    {gameState.players.map((p, i) => (
+                        <div key={p.id} className={`p-8 rounded-[3rem] border-4 transition-all ${gameState.currentTurnIndex === i ? 'border-cyan-400 bg-cyan-900/20 shadow-2xl scale-105' : 'border-slate-800 opacity-40'}`}>
+                            <img src={p.avatar_url} className="w-24 h-24 rounded-full border-2 border-white/20 object-cover bg-black mb-4 shadow-xl" alt="" />
+                            <p className="text-center font-black uppercase text-sm">{p.username}</p>
+                            <p className="text-center text-5xl font-mono mt-4 text-cyan-400">{p.diddle_score ?? '??'}</p>
+                        </div>
+                    ))}
                 </div>
-            ))}
-          </div>
-          <div className="mt-12 flex gap-4">
-             <button onClick={() => { (document.getElementById('bbInput') as HTMLInputElement).value = "25"; handleManualHit(1); }} className="bg-green-600 px-10 py-5 rounded-2xl font-black shadow-lg">OUTER BULL</button>
-             <button onClick={() => { (document.getElementById('bbInput') as HTMLInputElement).value = "25"; handleManualHit(2); }} className="bg-red-600 px-10 py-5 rounded-2xl font-black shadow-lg">BULLSEYE</button>
-             <button onClick={() => { (document.getElementById('bbInput') as HTMLInputElement).value = "1"; handleManualHit(1); }} className="bg-slate-800 px-10 py-5 rounded-2xl font-black opacity-50">MISS</button>
-             <input type="hidden" id="bbInput" />
-          </div>
-        </div>
-      )}
-
-      {/* CHOICE MODAL */}
-      {decider && (
-        <div className="fixed inset-0 z-[200] bg-black/95 flex flex-col items-center justify-center p-6">
-            <img src={decider.avatar_url} className="w-40 h-40 rounded-full border-4 border-[#00FF66] mb-6 object-cover bg-black" alt="" />
-            <h2 className="text-4xl font-black italic mb-12 uppercase">{decider.username} WINS BULL!</h2>
-            <div className="flex gap-6">
-                <button onClick={() => setRoles(decider.id)} className="bg-white text-black px-16 py-8 rounded-3xl font-black text-2xl hover:scale-110 transition shadow-2xl uppercase">BAT FIRST</button>
-                <button onClick={() => setRoles(gameState.players.find(p => p.id !== decider.id)!.id)} className="bg-red-600 text-white px-16 py-8 rounded-3xl font-black text-2xl hover:scale-110 transition shadow-2xl uppercase">BOWL FIRST</button>
             </div>
-        </div>
-      )}
+        )}
 
-      {/* GAME BOARD */}
-      {gameState.phase === 'PLAY' && batsman && bowler && (
-        <div className="w-full max-w-7xl flex flex-col items-center flex-grow">
-            <div className="w-full grid grid-cols-1 lg:grid-cols-2 gap-8 flex-grow items-center">
-                {/* BATSMAN */}
-                <div className={`p-8 rounded-[4rem] border-8 transition-all ${currentPlayer.role === 'batting' ? 'border-[#00FF66] bg-[#00FF66]/5 shadow-2xl' : 'border-slate-900 opacity-40'}`}>
-                    <div className="flex items-center gap-6 mb-6">
-                        <img src={batsman.avatar_url} className="w-20 h-20 rounded-full border-2 border-white/10 object-cover bg-black" alt="" />
-                        <div><p className="text-[#00FF66] font-black uppercase text-xs">Batsman</p><h3 className="text-3xl font-black italic uppercase">{batsman.username}</h3></div>
+        {/* PHASE: CHOICE */}
+        {decider && (
+            <div className="fixed inset-0 z-[200] bg-black/95 backdrop-blur-xl flex flex-col items-center justify-center p-6 animate-in fade-in">
+                <img src={decider.avatar_url} className="w-40 h-40 rounded-full border-4 border-[#00FF66] mb-6 object-cover bg-black shadow-2xl" alt="" />
+                <h2 className="text-4xl font-black italic mb-12 uppercase text-white">{decider.username} WINS BULL!</h2>
+                <div className="flex gap-6">
+                    <button onClick={() => setRoles(decider.id)} className="bg-white text-black px-16 py-8 rounded-3xl font-black text-2xl hover:scale-110 transition shadow-2xl uppercase italic">BAT FIRST</button>
+                    <button onClick={() => setRoles(gameState.players.find(p => p.id !== decider.id)!.id)} className="bg-red-600 text-white px-16 py-8 rounded-3xl font-black text-2xl hover:scale-110 transition shadow-2xl uppercase italic">BOWL FIRST</button>
+                </div>
+            </div>
+        )}
+
+        {/* PHASE: PLAY */}
+        {gameState.phase === 'PLAY' && batsman && bowler && (
+            <div className="w-full max-w-[1400px] grid grid-cols-1 lg:grid-cols-2 gap-8 items-center h-full pb-8">
+                {/* BATSMAN CARD */}
+                <div className={`p-8 rounded-[4rem] border-8 transition-all h-[55vh] flex flex-col items-center justify-center ${currentPlayer.role === 'batting' ? 'border-[#00FF66] bg-[#00FF66]/5 shadow-2xl' : 'border-slate-900 opacity-40'}`}>
+                    <div className="flex items-center gap-6 mb-6 w-full px-10">
+                        <img src={batsman.avatar_url} className="w-20 h-20 rounded-full border-4 border-white/10 object-cover bg-black shadow-lg" alt="" />
+                        <div className="text-left">
+                            <p className="text-[#00FF66] font-black uppercase text-xs tracking-[0.2em]">Active Batsman</p>
+                            <h3 className="text-3xl font-black italic uppercase tracking-tighter">{batsman.username}</h3>
+                        </div>
                     </div>
-                    <div className="text-[10rem] font-black leading-none tracking-tighter tabular-nums">{batsman.score}</div>
-                    {gameState.innings === 2 && <p className="text-white text-lg font-bold mt-4 italic uppercase">Chase: {gameState.innings_1_target! + 1}</p>}
+
+                    <div className="text-[12rem] font-black leading-none tracking-tighter tabular-nums text-white text-center drop-shadow-[0_0_50px_rgba(0,255,102,0.2)]">
+                        {batsman.score}
+                    </div>
+                    <p className="text-slate-500 font-black text-xl uppercase italic tracking-[0.3em]">Total Runs</p>
+
+                    {/* NEW: RUNS NEEDED VISIBLE AT ALL TIMES (Innings 2) */}
+                    {gameState.innings === 2 && gameState.innings_1_target !== null && (
+                        <div className="mt-8 flex flex-col items-center animate-in slide-in-from-bottom-5 duration-500">
+                            <div className="bg-[#00FF66]/10 border-2 border-[#00FF66] px-10 py-4 rounded-[2rem] shadow-[0_0_30px_rgba(0,255,102,0.3)]">
+                                <p className="text-white/60 text-[10px] font-black uppercase text-center tracking-[0.4em] mb-1">Target: {gameState.innings_1_target + 1}</p>
+                                <div className="flex items-baseline gap-2">
+                                    <span className="text-5xl font-black text-white tabular-nums">
+                                        {Math.max(0, (gameState.innings_1_target + 1) - batsman.score)}
+                                    </span>
+                                    <span className="text-[#00FF66] font-black text-sm uppercase italic">Runs Needed</span>
+                                </div>
+                            </div>
+                        </div>
+                    )}
                 </div>
 
-                {/* BOWLER */}
-                <div className={`p-8 rounded-[4rem] border-8 transition-all ${currentPlayer.role === 'bowling' ? 'border-red-600 bg-red-950/10 shadow-2xl' : 'border-slate-900 opacity-40'}`}>
-                    <div className="flex items-center gap-6 mb-8">
-                        <img src={bowler.avatar_url} className="w-20 h-20 rounded-full border-2 border-white/10 object-cover bg-black" alt="" />
-                        <div><p className="text-red-500 font-black uppercase text-xs">Bowler</p><h3 className="text-3xl font-black italic uppercase">{bowler.username}</h3></div>
+                {/* BOWLER CARD */}
+                <div className={`p-8 rounded-[4rem] border-8 transition-all h-[55vh] flex flex-col items-center justify-center ${currentPlayer.role === 'bowling' ? 'border-red-600 bg-red-950/10 shadow-2xl' : 'border-slate-900 opacity-40'}`}>
+                    <div className="flex items-center gap-6 mb-8 w-full px-10">
+                        <img src={bowler.avatar_url} className="w-20 h-20 rounded-full border-4 border-white/10 object-cover bg-black shadow-lg" alt="" />
+                        <div className="text-left">
+                            <p className="text-red-500 font-black uppercase text-xs tracking-[0.2em]">Active Bowler</p>
+                            <h3 className="text-3xl font-black italic uppercase tracking-tighter">{bowler.username}</h3>
+                        </div>
                     </div>
-                    <div className="grid grid-cols-5 gap-3 mb-8">
+                    
+                    <div className="grid grid-cols-5 gap-3 mb-8 px-10">
                         {[1,2,3,4,5,6,7,8,9,10].map(w => (
-                            <div key={w} className={`aspect-square rounded-2xl flex items-center justify-center text-xl font-black border-2 transition-all ${w <= bowler.wickets ? 'bg-red-600 border-red-500 text-white' : w === bowler.wickets + 1 ? 'border-[#00FF66] text-[#00FF66] animate-pulse scale-110' : 'border-slate-800 text-slate-800'}`}>{w <= bowler.wickets ? 'X' : w}</div>
+                            <div key={w} className={`aspect-square rounded-2xl flex items-center justify-center text-2xl font-black border-2 transition-all ${
+                                w <= bowler.wickets ? 'bg-red-600 border-red-500 text-white shadow-lg' : 
+                                w === bowler.wickets + 1 ? 'border-[#00FF66] text-[#00FF66] animate-pulse scale-110' : 
+                                'border-slate-800 text-slate-800'
+                            }`}>
+                                {w <= bowler.wickets ? 'X' : w}
+                            </div>
                         ))}
                     </div>
-                    <div className="text-2xl font-black uppercase text-red-500">{bowler.wickets} / 10 Wickets</div>
+                    <div className="text-center text-2xl font-black uppercase italic text-red-500 tracking-widest leading-none">
+                        {bowler.wickets} / 10 Wickets
+                    </div>
                 </div>
             </div>
+        )}
+      </div>
 
-            {/* INPUT CONSOLE */}
-            {!gameState.winnerId && (
-              <div className="w-full max-w-md bg-slate-900/90 p-8 rounded-t-[4rem] border-t-4 border-slate-700 mt-8 shadow-2xl">
-                <div className="flex gap-2 justify-center mb-6 h-10">
-                    {gameState.dartsThrown.map((d, i) => (<div key={i} className="bg-white text-black px-4 py-1 rounded-full font-black italic text-xs animate-in zoom-in">HIT</div>))}
-                </div>
-                <p className="text-center text-slate-500 font-black text-xs uppercase mb-4 tracking-widest">
-                    Target: {currentPlayer.role === 'bowling' ? (bowler.wickets + 1) : 'ANYTHING'}
-                </p>
-                <input type="number" id="bbInput" className="bg-black border-2 border-slate-800 w-full p-4 rounded-2xl text-center text-4xl font-black mb-4 outline-none focus:border-[#00FF66]" placeholder="00" />
-                <div className="grid grid-cols-3 gap-2">
-                    <button onClick={() => handleManualHit(1)} className="bg-slate-800 p-4 rounded-xl font-black text-xs">S</button>
-                    <button onClick={() => handleManualHit(2)} className="bg-blue-600 p-4 rounded-xl font-black text-xs">D</button>
-                    <button onClick={() => handleManualHit(3)} className="bg-red-600 p-4 rounded-xl font-black text-xs">T</button>
-                    <button onClick={() => setGameState(prev => ({...prev!, currentTurnIndex: (prev!.currentTurnIndex + 1) % 2, dartsThrown: []}))} className="col-span-3 bg-[#00FF66] text-black p-4 rounded-xl font-black mt-2 uppercase text-xs italic shadow-lg">End Turn</button>
-                </div>
-              </div>
-            )}
+      {/* 3. ARCADE NUMPAD CONSOLE */}
+      {!gameState.winnerId && (
+        <div className="w-full flex justify-center z-30">
+          <ArcadeNumpad 
+            activeGooierName={currentPlayer?.username || "Gooier"}
+            dartsThrownCount={gameState.dartsThrown.length}
+            onThrow={onThrow}
+            onEndTurn={() => setGameState(prev => ({...prev!, currentTurnIndex: (prev!.currentTurnIndex + 1) % prev!.players.length, dartsThrown: []}))}
+            color={gameState.phase === 'DIDDLE' ? "#00f2ff" : (currentPlayer?.role === 'batting' ? "#00FF66" : "#dc2626")}
+          />
         </div>
+      )}
+
+      {/* WIN MODAL */}
+      {gameState.winnerId && (
+         <div className="fixed inset-0 z-[1000] bg-black/95 flex flex-col items-center justify-center p-6 animate-in zoom-in">
+             <div className="relative bg-[#0a0a1a] border-4 border-[#00FF66] p-12 rounded-[4rem] max-w-2xl w-full text-center shadow-2xl">
+                <h2 className="text-9xl font-black italic text-[#00FF66] uppercase mb-4 tracking-tighter">VICTORY</h2>
+                <img src={gameState.players.find(p => p.id === gameState.winnerId)?.avatar_url} className="w-48 h-48 rounded-full border-8 border-[#00FF66] mx-auto mb-6 object-cover bg-black shadow-2xl" alt="" />
+                <p className="text-4xl font-black text-white uppercase italic">{gameState.players.find(p => p.id === gameState.winnerId)?.username}</p>
+                <div className="grid grid-cols-2 gap-4 mt-10">
+                    <button onClick={() => window.location.reload()} className="bg-white text-black py-6 rounded-3xl font-black text-2xl hover:scale-105 transition shadow-lg uppercase italic">REMATCH</button>
+                    <button onClick={() => router.push('/')} className="bg-slate-900 text-white border-2 border-slate-700 py-6 rounded-3xl font-black text-2xl hover:bg-red-600 transition shadow-lg uppercase italic">LOBBY</button>
+                </div>
+             </div>
+         </div>
       )}
 
       <ReactionOverlay url={reactionUrl} onFinished={() => setReactionUrl(null)} />

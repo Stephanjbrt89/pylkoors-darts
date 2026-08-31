@@ -12,6 +12,7 @@ import { ArcadeLogo } from '@/components/ArcadeLogo';
 import { GameInfo } from '@/components/GameInfo';
 import { ReactionOverlay } from '@/components/ReactionOverlay';
 import { NewRecordModal } from '@/components/NewRecordModal';
+import { ArcadeNumpad } from '@/components/ArcadeNumpad'; // FIXED: Added missing import
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
@@ -21,7 +22,6 @@ export default function AroundTheWorldPage() {
   const [showSquadSelect, setShowSquadSelect] = useState(true);
   const [reactionUrl, setReactionUrl] = useState<string | null>(null);
   
-  // RECORD TRACKING STATES
   const [dartCount, setDartCount] = useState(0);
   const [recordData, setRecordData] = useState<any>(null);
   
@@ -30,7 +30,11 @@ export default function AroundTheWorldPage() {
   const handleStartGame = async (selectedPlayers: any[]) => {
     setShowSquadSelect(false);
     try {
-      const cleaned = selectedPlayers.map(p => ({ id: p.id, username: p.username, avatar_url: p.avatar_url }));
+      const cleaned = selectedPlayers.map(p => ({ 
+        id: String(p.id), 
+        username: String(p.username), 
+        avatar_url: String(p.avatar_url) 
+      }));
       const id = await ArcadeService.createMultiplayerMatch('ARCADE_ATW', cleaned.map(p => p.id));
       const initialState = ATWEngine.createInitialState(cleaned);
       setMatchId(id);
@@ -42,23 +46,21 @@ export default function AroundTheWorldPage() {
     }
   };
 
-  const handleHit = async (multiplier: number, isMiss: boolean = false) => {
+  const handleHit = async (score: number, multiplier: number, label: string) => {
     if (!gameState || !matchId || gameState.isFinished) return;
-    
+    // Increment session dart counter
     const currentTotalDarts = dartCount + 1;
     setDartCount(currentTotalDarts);
 
-    const currentPlayer = gameState.players[gameState.currentTurnIndex];
-    const target = ATW_TARGETS[currentPlayer.currentTargetIndex];
-    
+    // Pass the dart to the engine
     const nextState = ATWEngine.handleThrow(gameState, { 
-        score: isMiss ? 0 : target, 
-        multiplier: multiplier, 
-        raw: isMiss ? 'MISS' : (multiplier === 3 ? 'T' : multiplier === 2 ? 'D' : 'S') 
+        score, 
+        multiplier, 
+        raw: label 
     });
 
     if (nextState.isFinished && nextState.winnerId) {
-      // 1. CHECK FOR NEW BAR RECORD
+      // Check for World Record
       const isNewRecord = await StatsService.updateRecord(
         'ARCADE_ATW', 
         'FEWEST_DARTS', 
@@ -73,7 +75,7 @@ export default function AroundTheWorldPage() {
         setRecordData({ 
           type: 'FEWEST_DARTS', 
           value: currentTotalDarts, 
-          name: currentPlayer.username 
+          name: nextState.players.find(p => p.id === nextState.winnerId)?.username || 'Gooier'
         });
       } else {
         SoundService.play('win');
@@ -90,16 +92,22 @@ export default function AroundTheWorldPage() {
   if (showSquadSelect) {
     return (
       <div className="relative min-h-screen bg-black">
-        <SquadSelect gameName="Around The World" onStart={handleStartGame} onCancel={() => router.push('/')} />
+        <SquadSelect 
+          gameName="ATW Journey" 
+          minPlayers={1} 
+          maxPlayers={4} 
+          onStart={handleStartGame} 
+          onCancel={() => router.push('/')} 
+        />
         <div className="fixed bottom-10 right-10 z-[1000]">
           <GameInfo 
-            title="Around The World" 
+            title="ATW Journey" 
             color="#00f2ff" 
             rules={[
               "Hit numbers 1-20 in order, then Bullseye.",
-              "Doubles skip 1 number ahead; Triples skip 2.",
-              "Winning on fewer darts sets a Bar Record.",
-              "First to hit Bullseye wins the match."
+              "Doubles skip 1 number; Triples skip 2.",
+              "Darts outside your current target score 0.",
+              "Finish on fewer darts to set a Bar Record."
             ]} 
           />
         </div>
@@ -113,69 +121,75 @@ export default function AroundTheWorldPage() {
   const currentTarget = ATW_TARGETS[currentPlayer.currentTargetIndex];
 
   return (
-    <main className="min-h-screen bg-[#020817] text-white p-6 flex flex-col items-center overflow-hidden">
-      <div className="w-full max-w-5xl flex justify-between items-center mb-8">
-        <Link href="/" className="text-[10px] font-black bg-slate-900 px-6 py-2 rounded-full border border-white/10 uppercase tracking-widest">Quit</Link>
-        <h1 className="text-4xl font-black italic tracking-tighter uppercase text-cyan-400">Around The World</h1>
+    <main className="h-screen w-full grid grid-rows-[60px_1fr_min-content] bg-[#020817] text-white overflow-hidden relative">
+      
+      {/* 1. HUD HEADER */}
+      <div className="w-full flex justify-between items-center px-10 py-2 bg-black/40 border-b border-white/5 z-20">
+        <Link href="/" className="bg-slate-900 border border-slate-700 px-6 py-2 rounded-full text-[10px] font-black uppercase hover:bg-red-600 transition">LOBBY</Link>
+        <div className="text-center">
+            <h1 className="text-xl font-black italic tracking-[0.3em] uppercase text-cyan-400">ATW Journey</h1>
+        </div>
         <div className="text-right">
-            <p className="text-[10px] font-black text-slate-500 uppercase">Total Darts</p>
+            <p className="text-[9px] font-black text-slate-500 uppercase">Turn Darts</p>
             <p className="text-xl font-black text-white tabular-nums">{dartCount}</p>
         </div>
       </div>
 
-      {/* Progress Bars */}
-      <div className="w-full max-w-6xl grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-12">
-        {gameState.players.map((p, idx) => (
-          <div key={p.id} className={`p-6 rounded-[2rem] border-4 transition-all duration-500 ${idx === gameState.currentTurnIndex && !gameState.isFinished ? 'border-cyan-500 bg-cyan-950/20 shadow-2xl scale-105' : 'border-slate-900 opacity-40'}`}>
-            <div className="flex justify-between items-center mb-4">
-                <div className="flex items-center gap-3">
-                    <img src={p.avatar} className="w-10 h-10 rounded-full border-2 border-white/20" alt="" />
-                    <p className="font-black uppercase italic text-xs truncate">{p.username}</p>
+      {/* 2. PROGRESS ARENA */}
+      <div className="relative z-10 flex flex-col items-center justify-center p-4 h-full">
+        <div className="w-full max-w-6xl grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+            {gameState.players.map((p, idx) => (
+            <div key={p.id} className={`p-4 rounded-3xl border-2 transition-all duration-500 ${idx === gameState.currentTurnIndex && !gameState.isFinished ? 'border-cyan-500 bg-cyan-950/20 shadow-2xl scale-105' : 'border-slate-900 opacity-40'}`}>
+                <div className="flex justify-between items-center mb-3">
+                    <div className="flex items-center gap-3">
+                        <img src={p.avatar} className="w-10 h-10 rounded-full border border-white/20 object-cover" alt="" />
+                        <p className="font-black uppercase italic text-[10px] truncate">{p.username}</p>
+                    </div>
+                    <span className="bg-cyan-500 text-black px-2 py-0.5 rounded text-[10px] font-black italic">TGT: {ATW_TARGETS[p.currentTargetIndex] === 25 ? 'BULL' : ATW_TARGETS[p.currentTargetIndex]}</span>
                 </div>
-                <p className="text-[10px] font-black text-cyan-500 uppercase tracking-tighter">Target: {ATW_TARGETS[p.currentTargetIndex] === 25 ? 'BULL' : ATW_TARGETS[p.currentTargetIndex]}</p>
+                <div className="w-full h-1.5 bg-black rounded-full overflow-hidden flex">
+                    <div className="h-full bg-cyan-500 transition-all duration-700 shadow-[0_0_10px_cyan]" style={{ width: `${(p.currentTargetIndex / ATW_TARGETS.length) * 100}%` }} />
+                </div>
             </div>
-            <div className="w-full h-2 bg-black rounded-full p-0.5 border border-slate-800 overflow-hidden flex">
-                <div className="h-full bg-cyan-500 rounded-full transition-all duration-700 shadow-[0_0_10px_cyan]" style={{ width: `${(p.currentTargetIndex / ATW_TARGETS.length) * 100}%` }} />
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Target Display */}
-      <div className="flex-grow flex flex-col items-center justify-center text-center">
-        {gameState.isFinished ? (
-            <div className="animate-bounce">
-                <h2 className="text-7xl font-black text-green-500 italic uppercase tracking-tighter">World Conquered</h2>
-                <Link href="/" className="mt-8 inline-block bg-white text-black px-10 py-4 rounded-2xl font-black uppercase text-sm shadow-2xl">Return to Lobby</Link>
-            </div>
-        ) : (
-            <div className="animate-in fade-in zoom-in duration-500">
-                <p className="text-xs font-black text-cyan-400 uppercase tracking-[0.5em] mb-4 opacity-50">Locked Target</p>
-                <h2 className="text-[14rem] leading-none font-black italic text-white drop-shadow-[0_0_50px_rgba(0,242,255,0.4)]">
-                  {currentTarget === 25 ? 'BULL' : currentTarget}
-                </h2>
-            </div>
-        )}
-      </div>
-
-      {/* Input Console */}
-      {!gameState.isFinished && (
-        <div className="bg-slate-900/90 backdrop-blur-xl p-8 rounded-t-[4rem] border-t-4 border-cyan-600 w-full max-w-md mt-auto shadow-2xl">
-          <div className="flex gap-2 mb-6 justify-center h-10">
-            {gameState.dartsThrown.map((d, i) => (
-              <div key={i} className="bg-cyan-600 px-5 py-2 rounded-full font-black italic text-xs animate-in zoom-in">HIT</div>
             ))}
-          </div>
-          <div className="grid grid-cols-3 gap-3">
-            <button onClick={() => handleHit(1)} className="bg-slate-800 hover:bg-slate-700 p-6 rounded-2xl font-black text-sm text-white">SINGLE</button>
-            <button onClick={() => handleHit(2)} className="bg-slate-700 hover:bg-slate-600 p-6 rounded-2xl font-black text-sm text-blue-400">DOUBLE</button>
-            <button onClick={() => handleHit(3)} className="bg-slate-700 hover:bg-slate-600 p-6 rounded-2xl font-black text-sm text-red-400">TRIPLE</button>
-            <button onClick={() => handleHit(1, true)} className="col-span-3 bg-black border-2 border-slate-800 p-4 rounded-2xl font-black text-slate-500 hover:text-white uppercase text-xs transition">Miss Target</button>
-          </div>
+        </div>
+
+        <div className="text-center">
+            {gameState.isFinished ? (
+                <div className="animate-bounce">
+                    <h2 className="text-8xl font-black text-green-500 italic uppercase tracking-tighter">Conquered!</h2>
+                </div>
+            ) : (
+                <div className="animate-in zoom-in duration-500">
+                    <p className="text-xs font-black text-cyan-400 uppercase tracking-[0.6em] mb-4 opacity-50">Locked Target</p>
+                    <h2 className="text-[14rem] leading-none font-black italic text-white drop-shadow-[0_0_50px_rgba(0,242,255,0.4)] tabular-nums">
+                    {currentTarget === 25 ? 'BULL' : currentTarget}
+                    </h2>
+                </div>
+            )}
+        </div>
+      </div>
+
+      {/* 3. ARCADE CONSOLE */}
+      {!gameState.isFinished && (
+        <div className="w-full flex justify-center z-30">
+          <ArcadeNumpad 
+            activeGooierName={currentPlayer.username}
+            dartsThrownCount={gameState.dartsThrown.length}
+            onThrow={handleHit}
+            onEndTurn={() => {
+                setGameState(prev => ({ 
+                    ...prev!, 
+                    currentTurnIndex: (prev!.currentTurnIndex + 1) % prev!.players.length, 
+                    dartsThrown: [] 
+                }));
+            }}
+            color="#00f2ff"
+          />
         </div>
       )}
-      
-      {/* OVERLAYS */}
+
+      {/* 4. MODALS */}
       <ReactionOverlay url={reactionUrl} onFinished={() => setReactionUrl(null)} />
       <NewRecordModal 
         show={!!recordData} 
@@ -183,6 +197,14 @@ export default function AroundTheWorldPage() {
         value={recordData?.value} 
         playerName={recordData?.name} 
       />
+
+      {gameState.isFinished && (
+          <div className="fixed inset-0 z-[1000] bg-black/95 flex flex-col items-center justify-center p-6 animate-in zoom-in">
+              <h2 className="text-9xl font-black italic text-cyan-400 uppercase mb-8 tracking-tighter italic">World Traveler</h2>
+              <p className="text-3xl font-black text-white uppercase mb-12">{gameState.players.find(p => p.id === gameState.winnerId)?.username} Finished the Map</p>
+              <button onClick={() => window.location.reload()} className="bg-white text-black px-16 py-6 rounded-full font-black text-xl hover:scale-110 transition shadow-2xl">NEW JOURNEY</button>
+          </div>
+      )}
     </main>
   );
 }
