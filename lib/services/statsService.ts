@@ -1,13 +1,14 @@
+// lib/services/statsService.ts
 import { supabase } from '../supabase';
 
-export type RecordType = 'FEWEST_DARTS' | 'HIGHEST_SCORE' | 'HIGHEST_CHECKOUT' | 'ACCURACY';
+export type RecordType = 'FEWEST_DARTS' | 'HIGHEST_SCORE' | 'LOWEST_SCORE' | 'HIGHEST_CHECKOUT' | 'ACCURACY';
 
 export const StatsService = {
   async updateRecord(mode: string, type: RecordType, playerId: string, value: number, matchId: string): Promise<boolean> {
     try {
-      const isLowerBetter = type === 'FEWEST_DARTS';
+      // FEWEST_DARTS and LOWEST_SCORE: Lower is better.
+      const isLowerBetter = type === 'FEWEST_DARTS' || type === 'LOWEST_SCORE';
       
-      // 1. Check if the current World Record for this specific slot is beaten
       const { data: currentRecord } = await supabase
         .from('game_records')
         .select('value')
@@ -17,9 +18,8 @@ export const StatsService = {
 
       let isNewRecord = false;
       if (!currentRecord) {
-        isNewRecord = true; // First time anyone has played!
+        isNewRecord = true;
       } else {
-        // Compare new value against the current world record
         if (isLowerBetter) {
           if (value < currentRecord.value) isNewRecord = true;
         } else {
@@ -28,8 +28,6 @@ export const StatsService = {
       }
 
       if (isNewRecord) {
-        // 2. THE UPSERT: Overwrite the previous record holder
-        // This ensures only ONE player holds the glory for this specific category.
         const { error } = await supabase
           .from('game_records')
           .upsert({

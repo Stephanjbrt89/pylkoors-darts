@@ -8,7 +8,6 @@ export interface HalfeertjiesPlayer {
   username: string;
   avatar_url: string;
   score: number;
-  diddle_score: number | null;
 }
 
 export interface HalfeertjiesState {
@@ -17,7 +16,7 @@ export interface HalfeertjiesState {
   currentTurnIndex: number;
   dartsThrown: Dart[];
   targets: { type: HalfeertjiesTarget; label: string; value?: number }[];
-  phase: 'DIDDLE' | 'PLAY' | 'FINISHED';
+  phase: 'ROULETTE' | 'PLAY' | 'FINISHED'; // Changed from DIDDLE to ROULETTE
   winnerId: string | null;
 }
 
@@ -48,16 +47,27 @@ export const HalfeertjiesEngine = {
         id: p.id, 
         username: p.username, 
         avatar_url: p.avatar_url, 
-        score: 0, 
-        diddle_score: null 
+        score: 0 
       })),
       roundIndex: 0,
       currentTurnIndex: 0,
       dartsThrown: [],
       targets,
-      // SOLO FIX: Skip diddle if only 1 player
-      phase: players.length === 1 ? 'PLAY' : 'DIDDLE',
+      phase: 'ROULETTE',
       winnerId: null
+    };
+  },
+
+  // NEW: Sets the turn order so the roulette winner throws first
+  startMatch: (state: HalfeertjiesState, winnerId: string): HalfeertjiesState => {
+    const winnerIdx = state.players.findIndex(p => p.id === winnerId);
+    // Shift the array so winner is at index 0
+    const reordered = [...state.players.slice(winnerIdx), ...state.players.slice(0, winnerIdx)];
+    return { 
+      ...state, 
+      players: reordered, 
+      phase: 'PLAY', 
+      currentTurnIndex: 0 
     };
   },
 
@@ -70,22 +80,10 @@ export const HalfeertjiesEngine = {
   },
 
   handleThrow: (state: HalfeertjiesState, dart: Dart): HalfeertjiesState => {
-    if (state.phase === 'FINISHED') return state;
+    if (state.phase !== 'PLAY') return state;
+    
     const newState = { ...state, players: state.players.map(p => ({ ...p })) };
     const currentPlayer = newState.players[newState.currentTurnIndex];
-
-    if (newState.phase === 'DIDDLE') {
-      currentPlayer.diddle_score = dart.score === 25 ? (dart.multiplier * 25) : 0;
-      if (newState.players.every(p => p.diddle_score !== null)) {
-        const sorted = [...newState.players].sort((a, b) => b.diddle_score! - a.diddle_score!);
-        newState.players = sorted; 
-        newState.phase = 'PLAY';
-        newState.currentTurnIndex = 0;
-      } else {
-        newState.currentTurnIndex = (newState.currentTurnIndex + 1) % newState.players.length;
-      }
-      return newState;
-    }
 
     const currentDarts = [...newState.dartsThrown, dart];
     if (currentDarts.length < 3) {

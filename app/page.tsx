@@ -119,7 +119,7 @@ export default function Home() {
               <span className="w-2 h-2 bg-red-600 rounded-full animate-pulse" /> Select Experience
             </h3>
             
-            {/* THE SUPER 6 CABINETS (3x2 Grid) */}
+            {/* THE SUPER 7 CABINETS (3x2 Grid) */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
               <GameCard title="X01 CLASSIC" subtitle="Competitive" color="from-blue-600/40 to-black" link="/play-test" imageText="🎯" />
               <GameCard title="KILLER TACTICS" subtitle="Elimination" color="from-red-600/40 to-black" link="/killer" imageText="💀" />
@@ -128,6 +128,8 @@ export default function Home() {
               <GameCard title="ATW JOURNEY" subtitle="Around World" color="from-sky-400/40 to-black" link="/atw" imageText="🌍" />
               <GameCard title="FIGHT GAME" subtitle="Battle Royale" color="from-red-700/40 to-black" link="/fight" imageText="⚔️" />
               <GameCard title="HALFEERTJIES" subtitle="South African" color="from-yellow-600/40 to-black" link="/halfeertjies" imageText="📉" />
+              <GameCard title="DARTS GOLF" subtitle="Precision" color="from-emerald-600/40 to-black" link="/golf" imageText="⛳" />
+
             </div>
 
             {/* BAR WORLD RECORDS SECTION */}

@@ -3,15 +3,19 @@ export type ReactionCategory = 'BOOM' | 'BUST' | 'ELIMINATED' | 'WINNER' | 'RECO
 
 export const GifService = {
   getRandomGifUrl: (category: ReactionCategory): string => {
-    // Mapping keys to your local files in /public/reactions/
-    const mapping: Record<ReactionCategory, string> = {
-      BOOM: '/reactions/boom.gif',
-      BUST: '/reactions/bust.gif',
-      ELIMINATED: '/reactions/eliminated.gif',
-      WINNER: '/reactions/winner.gif',
-      RECORD: '/reactions/record.gif' // Make sure to add a record.gif here!
+    // Define how many files you have for each category in /public/reactions/
+    const counts: Record<ReactionCategory, number> = {
+      BOOM: 5,       // Looks for boom_1.gif through boom_5.gif
+      BUST: 5,       
+      ELIMINATED: 3, 
+      WINNER: 5,
+      RECORD: 3
     };
+
+    const max = counts[category];
+    const randomNum = Math.floor(Math.random() * max) + 1;
     
-    return mapping[category];
+    // Returns e.g., /reactions/boom_3.gif
+    return `/reactions/${category.toLowerCase()}_${randomNum}.gif`;
   }
 };
