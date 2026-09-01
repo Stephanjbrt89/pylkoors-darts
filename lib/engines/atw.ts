@@ -4,7 +4,7 @@ import { Dart } from '@/types/schema';
 export interface ATWPlayerData {
   id: string;
   username: string;
-  avatar_url: string; // FIXED
+  avatar_url: string;
   currentTargetIndex: number;
 }
 
@@ -13,6 +13,7 @@ export interface ATWState {
   targets: number[];
   currentTurnIndex: number;
   dartsThrown: Dart[];
+  phase: 'DIDDLE' | 'PLAY' | 'FINISHED'; // ADDED THIS
   isFinished: boolean;
   winnerId: string | null;
 }
@@ -24,18 +25,20 @@ export const ATWEngine = {
     players: players.map(p => ({
       id: p.id,
       username: p.username,
-      avatar_url: p.avatar_url, // FIXED
+      avatar_url: p.avatar_url,
       currentTargetIndex: 0
     })),
     targets: ATW_TARGETS,
     currentTurnIndex: 0,
     dartsThrown: [],
+    phase: players.length === 1 ? 'PLAY' : 'DIDDLE', // Initialize phase
     isFinished: false,
     winnerId: null
   }),
 
   handleThrow: (state: ATWState, dart: Dart): ATWState => {
     if (state.isFinished) return state;
+
     const newState = { ...state, players: state.players.map(p => ({ ...p })) };
     const currentPlayer = newState.players[newState.currentTurnIndex];
     const targetValue = newState.targets[currentPlayer.currentTargetIndex];
@@ -53,18 +56,21 @@ export const ATWEngine = {
 
       if (dart.score === 25) {
         newState.isFinished = true;
+        newState.phase = 'FINISHED'; // Update phase
         newState.winnerId = currentPlayer.id;
         return newState;
       }
     }
 
     const newDarts = [...newState.dartsThrown, dart];
+    
     if (newDarts.length === 3) {
       newState.dartsThrown = [];
       newState.currentTurnIndex = (newState.currentTurnIndex + 1) % newState.players.length;
     } else {
       newState.dartsThrown = newDarts;
     }
+
     return newState;
   }
 };
