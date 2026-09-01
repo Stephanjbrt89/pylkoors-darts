@@ -13,6 +13,7 @@ import { GameInfo } from '@/components/GameInfo';
 import { ArcadeNumpad } from '@/components/ArcadeNumpad';
 import { VisualDartboard } from '@/components/VisualDartboard';
 import { ReactionOverlay } from '@/components/ReactionOverlay';
+import { GooierRoulette } from '@/components/GooierRoulette';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
@@ -22,6 +23,7 @@ export default function HalfeertjiesPage() {
   const [showSquadSelect, setShowSquadSelect] = useState(true);
   const [reactionUrl, setReactionUrl] = useState<string | null>(null);
   const [selectedSquad, setSelectedSquad] = useState<any[]>([]);
+  const [isPadExpanded, setIsPadExpanded] = useState(false);
   const router = useRouter();
 
   const handleStartGame = async (selectedPlayers: any[]) => {
@@ -34,9 +36,7 @@ export default function HalfeertjiesPage() {
       setMatchId(id);
       setGameState(initialState);
       await ArcadeService.saveGameState(id, initialState);
-    } catch (err) { 
-      console.error(err); 
-    }
+    } catch (err) { console.error(err); }
   };
 
   const handleRouletteComplete = async (winnerId: string) => {
@@ -55,7 +55,7 @@ export default function HalfeertjiesPage() {
     
     const nextState = HalfeertjiesEngine.handleThrow(gameState, { score, multiplier, raw: label });
 
-    if (nextState.dartsThrown.length === 0 && nextState.phase !== 'DIDDLE') {
+    if (nextState.dartsThrown.length === 0 && nextState.phase !== 'ROULETTE') {
         const updatedPlayer = nextState.players[currentPlayerIdx];
         if (updatedPlayer.score < oldScore) {
             SoundService.play('bust');
@@ -80,7 +80,7 @@ export default function HalfeertjiesPage() {
     <div className="relative min-h-screen bg-black">
       <SquadSelect gameName="Halfeertjies" onStart={handleStartGame} onCancel={() => router.push('/')} />
       <div className="fixed bottom-10 right-10 z-[1000]">
-        <GameInfo title="Halfeertjies" color="#facc15" rules={["Hit targets to score.","Round 3 needs EXACT sum.","Miss all 3? Score halved."]} />
+        <GameInfo title="Halfeertjies" color="#facc15" rules={["Roulette decides who starts.","Hit targets to score.","Round 3 needs EXACT sum.","Miss all 3? Score halved."]} />
       </div>
     </div>
   );
@@ -107,14 +107,15 @@ export default function HalfeertjiesPage() {
   };
 
   return (
-    <main className="h-screen w-full grid grid-rows-[60px_auto_1fr_auto] bg-[#020205] text-white overflow-hidden relative">
+    <main className="h-screen w-full grid grid-rows-[60px_auto_1fr_auto] bg-[#020205] text-white overflow-hidden relative transition-all duration-500">
+      
       <div className="w-full flex justify-between items-center px-10 py-2 bg-black/40 border-b border-white/5 z-20">
-        <Link href="/" className="bg-slate-900 border border-slate-700 px-6 py-2 rounded-full text-[10px] font-black uppercase">BACK TO LOBBY</Link>
+        <Link href="/" className="bg-slate-900 border border-slate-700 px-6 py-2 rounded-full text-[10px] font-black uppercase hover:bg-red-600 transition shadow-lg">BACK TO LOBBY</Link>
         <h1 className="text-xl font-black italic text-yellow-500 uppercase">Halfeertjies</h1>
         <div className="w-20" /> 
       </div>
 
-      <div className="w-full flex gap-2 overflow-x-auto no-scrollbar py-4 px-10 border-b border-white/5 bg-white/5">
+      <div className="w-full flex gap-2 overflow-x-auto no-scrollbar py-4 px-10 border-b border-white/5 bg-white/5 shrink-0">
         {gameState.targets.map((t, i) => (
           <div key={i} className={`flex-shrink-0 px-5 py-2 rounded-xl border-2 font-black italic text-[10px] transition-all duration-500 ${
             i === gameState.roundIndex ? 'bg-yellow-500 border-white scale-110 text-black shadow-lg' : 'opacity-30 border-slate-800'
@@ -123,36 +124,36 @@ export default function HalfeertjiesPage() {
       </div>
 
       <div className="flex-grow flex flex-col items-center justify-center p-4 overflow-hidden relative">
-        <div className={`grid gap-4 w-full max-w-7xl mb-6 ${gameState.players.length <= 2 ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-4'}`}>
+        <div className={`grid gap-4 w-full max-w-7xl mb-6 transition-all duration-700 ${isPadExpanded ? 'scale-90 opacity-40' : 'scale-100'} ${gameState.players.length <= 2 ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-4'}`}>
             {gameState.players.map((p, idx) => (
-            <div key={p.id} className={`p-4 rounded-[2rem] border-4 transition-all ${
-                idx === gameState.currentTurnIndex ? 'border-yellow-500 bg-yellow-500/5 shadow-2xl scale-105' : 'border-slate-900 opacity-40'
+            <div key={p.id} className={`p-4 rounded-[2rem] border-4 transition-all duration-500 ${
+                idx === gameState.currentTurnIndex && gameState.phase === 'PLAY' ? 'border-yellow-500 bg-yellow-500/5 shadow-2xl scale-105' : 'border-slate-900 opacity-40'
             }`}>
                 <div className="flex items-center gap-4">
-                <img src={p.avatar_url} className="w-14 h-14 rounded-full border-2 border-white/20 object-cover bg-black" alt="" />
+                <img src={p.avatar_url} className="w-14 h-14 rounded-full border-2 border-white/20 object-cover bg-black shadow-lg" alt="" />
                 <div>
                     <p className="text-[10px] font-black text-yellow-500 leading-none mb-1">{p.username}</p>
-                    <p className="text-4xl font-black tabular-nums">{p.score}</p>
+                    <p className="text-4xl font-black tabular-nums tracking-tighter">{p.score}</p>
                 </div>
                 </div>
             </div>
             ))}
         </div>
 
-        <div className="flex flex-row items-center justify-center gap-12 flex-grow w-full max-h-full">
-            <div className="scale-110 lg:scale-125 transition-all">
+        <div className={`flex flex-row items-center justify-center gap-12 transition-all duration-1000 ${isPadExpanded ? 'scale-90' : 'scale-110 lg:scale-125'}`}>
+            <div className="drop-shadow-[0_0_50px_rgba(0,0,0,1)]">
                 <VisualDartboard lastDarts={gameState.dartsThrown} highlight={getVisualHighlight()} />
             </div>
             <div className="flex flex-col items-center text-center">
-                <p className="text-xs font-black text-yellow-500 uppercase tracking-[0.5em] mb-2 opacity-50">Must Hit</p>
+                <p className="text-xs font-black text-yellow-500 uppercase mb-2 opacity-50 italic">Must Hit</p>
                 <div className="flex flex-row items-center gap-10">
                     <h2 className="text-[12rem] leading-none font-black italic text-white drop-shadow-[0_0_60px_rgba(250,204,21,0.4)] tabular-nums">
                         {currentTarget.value || currentTarget.label}
                     </h2>
                     {remainingForExact !== null && (
-                        <div className="bg-cyan-500/10 border-2 border-cyan-400/50 p-8 rounded-[3rem] animate-pulse">
-                            <p className="text-[10px] font-black text-cyan-400 uppercase mb-2">Remaining</p>
-                            <p className="text-8xl font-black italic text-white tabular-nums">{remainingForExact}</p>
+                        <div className="bg-cyan-500/10 border-2 border-cyan-400/50 p-8 rounded-[3rem] shadow-[0_0_50px_rgba(34,211,238,0.2)] animate-pulse">
+                            <p className="text-[10px] font-black text-cyan-400 uppercase tracking-[0.4em] mb-2">Remaining</p>
+                            <p className="text-8xl font-black italic text-white tabular-nums leading-none">{remainingForExact}</p>
                         </div>
                     )}
                 </div>
@@ -167,6 +168,7 @@ export default function HalfeertjiesPage() {
             dartsThrownCount={gameState.dartsThrown.length}
             onThrow={handleHit}
             onEndTurn={() => setGameState(prev => ({...prev!, currentTurnIndex: (prev!.currentTurnIndex + 1) % prev!.players.length, dartsThrown: []}))}
+            onToggle={(e) => setIsPadExpanded(e)}
             color="#facc15"
           />
         </div>

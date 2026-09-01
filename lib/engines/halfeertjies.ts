@@ -16,7 +16,8 @@ export interface HalfeertjiesState {
   currentTurnIndex: number;
   dartsThrown: Dart[];
   targets: { type: HalfeertjiesTarget; label: string; value?: number }[];
-  phase: 'ROULETTE' | 'PLAY' | 'FINISHED'; // Changed from DIDDLE to ROULETTE
+  phase: 'ROULETTE' | 'PLAY' | 'FINISHED';
+  isFinished: boolean;
   winnerId: string | null;
 }
 
@@ -53,21 +54,21 @@ export const HalfeertjiesEngine = {
       currentTurnIndex: 0,
       dartsThrown: [],
       targets,
-      phase: 'ROULETTE',
+      phase: players.length === 1 ? 'PLAY' : 'ROULETTE',
+      isFinished: false,
       winnerId: null
     };
   },
 
-  // NEW: Sets the turn order so the roulette winner throws first
   startMatch: (state: HalfeertjiesState, winnerId: string): HalfeertjiesState => {
     const winnerIdx = state.players.findIndex(p => p.id === winnerId);
-    // Shift the array so winner is at index 0
     const reordered = [...state.players.slice(winnerIdx), ...state.players.slice(0, winnerIdx)];
     return { 
       ...state, 
       players: reordered, 
       phase: 'PLAY', 
-      currentTurnIndex: 0 
+      currentTurnIndex: 0,
+      isFinished: false
     };
   },
 
@@ -80,7 +81,7 @@ export const HalfeertjiesEngine = {
   },
 
   handleThrow: (state: HalfeertjiesState, dart: Dart): HalfeertjiesState => {
-    if (state.phase !== 'PLAY') return state;
+    if (state.phase !== 'PLAY' || state.isFinished) return state;
     
     const newState = { ...state, players: state.players.map(p => ({ ...p })) };
     const currentPlayer = newState.players[newState.currentTurnIndex];
@@ -122,6 +123,7 @@ export const HalfeertjiesEngine = {
       newState.roundIndex++;
       if (newState.roundIndex >= newState.targets.length) {
         newState.phase = 'FINISHED';
+        newState.isFinished = true;
         newState.winnerId = [...newState.players].sort((a, b) => b.score - a.score)[0].id;
       }
     }
