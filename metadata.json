@@ -1,0 +1,8 @@
+{
+  "name": "Pylkoors Darts Arcade",
+  "description": "The ultimate home bar darts experience with interactive arcade game modes, player profiles, stats, and real-time leaderboards.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

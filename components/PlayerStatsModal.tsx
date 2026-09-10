@@ -8,10 +8,17 @@ export const PlayerStatsModal = ({ player, onClose, onSelect, onDelete }: any) =
 
   useEffect(() => {
     // Ensure we are passing a string ID
-    ProfileService.getPlayerStats(String(player.id)).then(res => {
-      setStats(res);
-      setLoading(false);
-    });
+    setLoading(true);
+    ProfileService.getPlayerStats(String(player.id))
+      .then(res => {
+        setStats(res);
+        setLoading(false);
+      })
+      .catch((err) => {
+        console.error("Player stats load error:", err);
+        setStats({ played: 0, won: 0, lost: 0, winRate: 0, records: [] });
+        setLoading(false);
+      });
   }, [player.id]);
 
   if (!player) return null;

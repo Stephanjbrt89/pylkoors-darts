@@ -16,28 +16,45 @@ export default function Home() {
 
   useEffect(() => {
     const initializeLobby = async () => {
-      const saved = localStorage.getItem('pylkoors_player');
-      if (saved && saved !== "[object Object]") {
-        try {
-          const parsed = JSON.parse(saved);
-          if (parsed && parsed.username) setActivePlayer(parsed);
-        } catch (e) {
-          localStorage.removeItem('pylkoors_player');
+      try {
+        const saved = typeof window !== 'undefined' ? localStorage.getItem('pylkoors_player') : null;
+        if (saved && saved !== "[object Object]") {
+          try {
+            const parsed = JSON.parse(saved);
+            if (parsed && parsed.username) setActivePlayer(parsed);
+          } catch (e) {
+            localStorage.removeItem('pylkoors_player');
+          }
         }
+      } catch (err) {
+        console.warn("Storage access restricted:", err);
       }
 
       try {
-        const [matchData, leaderData, recordData] = await Promise.all([
-          supabase.from('matches').select('*').eq('status', 'IN_PROGRESS').order('created_at', { ascending: false }).limit(6),
-          ProfileService.getLeaderboard(),
-          StatsService.getGlobalRecords()
-        ]);
+        // Fetch via first-party API route with direct Supabase fallback
+        const lobbyRes = await fetch('/api/lobby', { cache: 'no-store' });
+        if (lobbyRes.ok) {
+          const json = await lobbyRes.json();
+          if (json.activeMatches) setActiveMatches(json.activeMatches);
+          if (json.leaderboard) setLeaderboard(json.leaderboard);
+          if (json.records) setRecords(json.records);
+        } else {
+          throw new Error('API route fallback');
+        }
+      } catch {
+        try {
+          const [matchData, leaderData, recordData] = await Promise.all([
+            supabase.from('matches').select('*').eq('status', 'IN_PROGRESS').order('created_at', { ascending: false }).limit(6),
+            ProfileService.getLeaderboard(),
+            StatsService.getGlobalRecords()
+          ]);
 
-        if (matchData.data) setActiveMatches(matchData.data);
-        setLeaderboard(leaderData || []);
-        setRecords(recordData || []);
-      } catch (err) {
-        console.error("Lobby Load Error:", err);
+          if (matchData.data) setActiveMatches(matchData.data);
+          setLeaderboard(leaderData || []);
+          setRecords(recordData || []);
+        } catch (err) {
+          console.error("Lobby Load Error:", err);
+        }
       }
     };
     initializeLobby();
@@ -80,15 +97,14 @@ export default function Home() {
                   <p className="text-[10px] font-black text-slate-500 uppercase leading-none tracking-tighter">Pilot</p>
                   <p className="text-sm font-black italic uppercase tracking-tighter text-white">{activePlayer.username}</p>
                 </div>
-                <button onClick={() => { localStorage.removeItem('pylkoors_player'); window.location.reload(); }} className="ml-4 text-[10px] bg-red-600 px-3 py-1 rounded font-black transition text-white hover:bg-red-500">EXIT</button>
+                <Link href="/players" className="ml-2 text-[10px] bg-slate-800 hover:bg-slate-700 px-3 py-1 rounded font-black transition text-slate-300">CHANGE</Link>
+                <button onClick={() => { try { localStorage.removeItem('pylkoors_player'); } catch {} window.location.reload(); }} className="ml-1 text-[10px] bg-red-600 px-3 py-1 rounded font-black transition text-white hover:bg-red-500">EXIT</button>
               </div>
             ) : (
-              <div className="mt-64 mr-4 animate-in slide-in-from-right-10 duration-1000">
-                <Link href="/players" className="group relative block">
-                    <div className="absolute -inset-1 bg-red-600 rounded-2xl blur opacity-30 group-hover:opacity-100 transition duration-500 animate-pulse"></div>
-                    <button className="relative px-12 py-5 bg-red-600 rounded-2xl font-black text-xl lg:text-2xl uppercase tracking-[0.2em] italic transition shadow-2xl border-2 border-white/20 text-white">
-                        Select Gooier
-                    </button>
+              <div className="animate-in slide-in-from-right-5 duration-700">
+                <Link href="/players" className="group relative inline-flex items-center gap-2 px-6 py-3 bg-red-600 hover:bg-red-500 rounded-2xl font-black text-sm lg:text-base uppercase tracking-widest italic transition shadow-2xl border border-white/20 text-white active:scale-95">
+                  <span className="w-2 h-2 rounded-full bg-white animate-ping" />
+                  Select Gooier
                 </Link>
               </div>
             )}
@@ -117,29 +133,172 @@ export default function Home() {
               <GameCard title="BRANDY SPECIAL" subtitle="Pub Classic" color="from-amber-600/40 to-black" link="/brandy" imageText="🥃" />
             </div>
 
-            <div className="mt-16 bg-slate-900/40 border-2 border-cyan-500/10 p-8 rounded-[3rem] shadow-2xl relative overflow-hidden">
-              <div className="absolute -top-24 -left-24 w-64 h-64 bg-cyan-500/10 rounded-full blur-[100px]" />
-              <h3 className="text-[11px] font-black text-cyan-400 uppercase tracking-[0.5em] mb-8 relative z-10">📜 Bar World Records</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 relative z-10">
-                {records.length > 0 ? records.map((rec, i) => (
-                  <div key={rec.id} className="flex items-center gap-4 bg-black/40 p-5 rounded-2xl border border-white/5 group hover:border-cyan-500/50 transition-all">
-                    <div className="relative">
-                        <img src={rec.profiles?.avatar_url || '/avatars/1.jpg'} className="w-14 h-14 rounded-full border-2 border-cyan-500/30 object-cover bg-black" alt="" />
-                        {i === 0 && <span className="absolute -top-1 -right-1 flex h-3 w-3"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span><span className="relative inline-flex rounded-full h-3 w-3 bg-cyan-500"></span></span>}
+            {activeMatches.length > 0 && activePlayer && (
+              <div className="mt-12">
+                <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.4em] mb-6 flex items-center gap-2">
+                  <span className="w-2 h-2 bg-emerald-500 rounded-full animate-ping" /> Active Sessions
+                </h3>
+                <div className="flex gap-4 overflow-x-auto pb-4 no-scrollbar">
+                  {activeMatches.map((m) => (
+                    <div key={m.id} className="relative flex-shrink-0">
+                      <Link href={getMatchLink(m.mode)} className="flex bg-slate-900 border-2 border-slate-800 p-4 rounded-2xl items-center gap-4 hover:border-red-600 transition pr-12 shadow-xl">
+                        <div className="w-10 h-10 bg-red-600 rounded-lg flex items-center justify-center font-black italic text-white shadow-md">
+                          {String(m.mode).charAt(7) || '🎯'}
+                        </div>
+                        <p className="text-sm font-bold italic uppercase tracking-tighter">
+                          {String(m.mode).replace('ARCADE_', '').replace('_', ' ')}
+                        </p>
+                      </Link>
+                      <button 
+                        onClick={(e) => abandonMatch(e, m.id)} 
+                        title="Abandon Session"
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-600 hover:text-red-500 transition font-black p-1"
+                      >
+                        ✕
+                      </button>
                     </div>
-                    <div>
-                      <p className="text-[9px] font-black text-slate-500 uppercase leading-none mb-1">{String(rec.game_mode).replace('ARCADE_', '').replace('_', ' ')}</p>
-                      <p className="text-xs font-bold text-white mb-1">{String(rec.record_type).replace('_', ' ')}</p>
-                      <p className="text-2xl font-black text-cyan-400 leading-none">{rec.value} <span className="text-[10px] text-slate-600 uppercase">{rec.record_type.includes('DART') ? 'Darts' : rec.record_type === 'ACCURACY' ? '%' : 'Pts'}</span></p>
-                      <p className="text-[10px] font-black text-slate-400 uppercase mt-1 italic">{rec.profiles?.username}</p>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* SIDEBAR: HALL OF FAME & BAR RECORDS */}
+          <div className="w-full xl:w-88 2xl:w-96 flex-shrink-0 xl:mt-[47px] space-y-8">
+            
+            {/* HALL OF FAME / LEGENDS */}
+            <div className="bg-gradient-to-b from-amber-950/40 via-slate-950 to-black border-2 border-amber-500/30 p-8 rounded-[3rem] shadow-2xl relative overflow-hidden">
+              <div className="absolute -top-24 -left-24 w-48 h-48 bg-amber-500/10 rounded-full blur-[80px]" />
+              <div className="flex items-center justify-between mb-8 relative z-10">
+                <h3 className="text-[11px] font-black text-amber-500 uppercase tracking-[0.4em] italic flex items-center gap-2">
+                  ★ Hall of Fame
+                </h3>
+                <span className="text-[9px] font-black uppercase text-amber-500/60 bg-amber-500/10 px-3 py-1 rounded-full border border-amber-500/20">
+                  Top Legends
+                </span>
+              </div>
+
+              <div className="space-y-6 relative z-10">
+                {leaderboard.length > 0 ? (
+                  leaderboard.map((player, i) => (
+                    <div 
+                      key={i} 
+                      className={`flex items-center justify-between group transition-transform ${
+                        i === 0 ? 'bg-amber-950/30 border border-amber-500/40 p-4 rounded-3xl shadow-[0_0_20px_rgba(245,158,11,0.15)] scale-[1.02]' : 'p-2'
+                      }`}
+                    >
+                      <div className="flex items-center gap-4 flex-grow min-w-0">
+                        <div className="relative w-14 h-14 flex-shrink-0">
+                          <div className={`rounded-full p-1 w-full h-full ${
+                            i === 0 
+                              ? 'bg-gradient-to-tr from-yellow-600 via-yellow-200 to-amber-600 shadow-[0_0_15px_rgba(251,191,36,0.6)]' 
+                              : i === 1 
+                              ? 'bg-gradient-to-tr from-slate-400 to-slate-200 shadow-md'
+                              : i === 2 
+                              ? 'bg-gradient-to-tr from-amber-700 to-amber-500'
+                              : 'bg-slate-800'
+                          }`}>
+                            <img 
+                              src={player.avatar || '/avatars/1.jpg'} 
+                              className="w-full h-full rounded-full bg-black object-cover" 
+                              alt={player.username} 
+                            />
+                          </div>
+                          <span className={`absolute -bottom-1 -right-1 w-6 h-6 flex items-center justify-center rounded-full border-2 border-black text-[10px] font-black ${
+                            i === 0 
+                              ? 'bg-yellow-400 text-black shadow-md' 
+                              : i === 1 
+                              ? 'bg-slate-300 text-black' 
+                              : i === 2 
+                              ? 'bg-amber-600 text-white' 
+                              : 'bg-slate-700 text-white'
+                          }`}>
+                            {i + 1}
+                          </span>
+                        </div>
+                        <div className="flex flex-col min-w-0">
+                          <p className={`font-black italic uppercase tracking-tighter truncate ${
+                            i === 0 ? 'text-yellow-400 text-lg' : 'text-slate-200 text-sm'
+                          }`}>
+                            {player.username}
+                          </p>
+                          {i === 0 && (
+                            <span className="text-[8px] font-black text-amber-500 uppercase tracking-[0.2em] mt-0.5 italic">
+                              Undisputed King
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="text-right flex-shrink-0 ml-3">
+                        <p className={`font-black leading-none ${i === 0 ? 'text-3xl text-yellow-400' : 'text-xl text-slate-400'}`}>
+                          {player.wins}
+                        </p>
+                        <p className="text-[8px] font-bold text-amber-600 uppercase mt-1 tracking-wider">Wins</p>
+                      </div>
                     </div>
+                  ))
+                ) : (
+                  <div className="text-center py-16 opacity-30">
+                    <span className="text-3xl block mb-2">🏆</span>
+                    <p className="text-[10px] font-black uppercase tracking-widest leading-tight">Empty Hall</p>
+                    <p className="text-[8px] text-slate-500 mt-1">Finish matches to claim the throne</p>
                   </div>
-                )) : <p className="opacity-20 italic text-xs px-4">Awaiting house records...</p>}
+                )}
               </div>
             </div>
-            {/* ... rest of page ... */}
+
+            {/* BAR WORLD RECORDS */}
+            <div className="bg-slate-900/40 border-2 border-cyan-500/20 p-8 rounded-[3rem] shadow-2xl relative overflow-hidden">
+              <div className="absolute -top-24 -left-24 w-64 h-64 bg-cyan-500/10 rounded-full blur-[100px]" />
+              <div className="flex items-center justify-between mb-8 relative z-10">
+                <h3 className="text-[11px] font-black text-cyan-400 uppercase tracking-[0.4em] italic flex items-center gap-2">
+                  📜 Bar Records
+                </h3>
+                <span className="text-[9px] font-black uppercase text-cyan-400/70 bg-cyan-500/10 px-3 py-1 rounded-full border border-cyan-500/20">
+                  Hall Records
+                </span>
+              </div>
+              <div className="space-y-4 relative z-10">
+                {records.length > 0 ? records.map((rec, i) => (
+                  <div key={rec.id || i} className="flex items-center gap-4 bg-black/40 p-4 rounded-2xl border border-white/5 group hover:border-cyan-500/50 transition-all">
+                    <div className="relative flex-shrink-0">
+                      <img src={rec.profiles?.avatar_url || '/avatars/1.jpg'} className="w-12 h-12 rounded-full border-2 border-cyan-500/30 object-cover bg-black" alt="" />
+                      {i === 0 && (
+                        <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-3 w-3 bg-cyan-500"></span>
+                        </span>
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-grow">
+                      <p className="text-[9px] font-black text-slate-500 uppercase leading-none mb-1 truncate">
+                        {String(rec.game_mode).replace('ARCADE_', '').replace('_', ' ')}
+                      </p>
+                      <p className="text-xs font-bold text-white mb-0.5 truncate">
+                        {String(rec.record_type).replace('_', ' ')}
+                      </p>
+                      <p className="text-[10px] font-black text-slate-400 uppercase italic truncate">
+                        {rec.profiles?.username || 'ANON'}
+                      </p>
+                    </div>
+                    <div className="text-right flex-shrink-0 ml-2">
+                      <p className="text-2xl font-black text-cyan-400 leading-none">{rec.value}</p>
+                      <p className="text-[9px] text-slate-500 uppercase font-black tracking-wider mt-1">
+                        {rec.record_type.includes('DART') ? 'Darts' : rec.record_type === 'ACCURACY' ? '%' : 'Pts'}
+                      </p>
+                    </div>
+                  </div>
+                )) : (
+                  <div className="text-center py-10 opacity-30">
+                    <span className="text-2xl block mb-1">📜</span>
+                    <p className="text-[10px] font-black uppercase tracking-widest leading-tight">No House Records</p>
+                    <p className="text-[8px] text-slate-500 mt-1">Break records in any game to post here</p>
+                  </div>
+                )}
+              </div>
+            </div>
+
           </div>
-          {/* ... hall of fame ... */}
         </div>
       </div>
     </main>
