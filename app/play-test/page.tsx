@@ -13,6 +13,8 @@ import { ReactionOverlay } from '@/components/ReactionOverlay';
 import { NewRecordModal } from '@/components/NewRecordModal';
 import { SquadSelect } from '@/components/SquadSelect';
 import { GameInfo } from '@/components/GameInfo';
+import { AutodartsStatusBadge } from '@/components/AutodartsStatusBadge';
+import { useAutodarts } from '@/lib/hooks/useAutodarts';
 import { Dart } from '@/types/schema';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -37,6 +39,23 @@ export default function X01PlayTest() {
   const [isPadExpanded, setIsPadExpanded] = useState(false);
 
   const router = useRouter();
+
+  // Autodarts Real-Time Hardware Bridge
+  useAutodarts({
+    enabled: !!matchId && !isWin,
+    matchId: matchId || undefined,
+    onThrow: (dart) => {
+      if (!isTransitioning && !isWin) {
+        handleThrow(dart.score, dart.multiplier, dart.raw);
+      }
+    },
+    onTakeout: () => {
+      if (!isTransitioning && !isWin && dartsThrown.length > 0) {
+        setDartsThrown([]);
+        setCurrentTurnIndex((prev) => (prev + 1) % activePlayers.length);
+      }
+    },
+  });
 
   const handleSquadConfirmed = (players: any[]) => {
     setActivePlayers(players);
@@ -163,7 +182,10 @@ export default function X01PlayTest() {
               );
             })}
           </div>
-          <div className="shrink-0 flex gap-4 items-center"><GameInfo title="X01" color="#2563eb" rules={[`Start at ${targetScore}.`, "First to 0 wins.", "Must finish on a DOUBLE."]} /></div>
+          <div className="shrink-0 flex gap-4 items-center">
+            <AutodartsStatusBadge />
+            <GameInfo title="X01" color="#2563eb" rules={[`Start at ${targetScore}.`, "First to 0 wins.", "Must finish on a DOUBLE."]} />
+          </div>
         </div>
       </div>
 

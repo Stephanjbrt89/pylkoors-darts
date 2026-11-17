@@ -7,6 +7,7 @@ import { StatsService } from '../lib/services/statsService';
 import Link from 'next/link';
 import { MainLogoBadge } from '../components/MainLogoBadge';
 import { ArcadeLogo } from '../components/ArcadeLogo';
+import { AutodartsStatusBadge } from '../components/AutodartsStatusBadge';
 
 export default function Home() {
   const [activeMatches, setActiveMatches] = useState<any[]>([]);
@@ -90,6 +91,7 @@ export default function Home() {
         <MainLogoBadge />
         <nav className="absolute top-0 w-full z-50 p-6 md:p-10 flex justify-end items-center pointer-events-none">
           <div className="flex items-center gap-4 pointer-events-auto">
+            <AutodartsStatusBadge />
             {activePlayer ? (
               <div className="flex items-center gap-3 bg-black/60 backdrop-blur-md border border-white/10 p-2 pr-6 rounded-full shadow-2xl">
                 <img src={activePlayer.avatar_url} className="w-10 h-10 rounded-full bg-black border-2 border-cyan-400 object-cover" alt="" />
