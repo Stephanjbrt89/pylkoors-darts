@@ -6,7 +6,18 @@ import { useAutodarts } from '@/lib/hooks/useAutodarts';
 import { Target, Zap } from 'lucide-react';
 
 export function AutodartsStatusBadge() {
-  const { isConnected, lastThrow, lastEventTime, activeBoardId, simulateThrow, simulateTakeout } = useAutodarts();
+  const {
+    isConnected,
+    realtimeConnected,
+    realtimeStatus,
+    sseConnected,
+    lastError,
+    lastThrow,
+    lastEventTime,
+    activeBoardId,
+    simulateThrow,
+    simulateTakeout,
+  } = useAutodarts();
   const [isOpen, setIsOpen] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -112,11 +123,20 @@ requests.post(PYLKOORS_URL, json={"type": "TAKEOUT", "boardId": BOARD_ID})
                   />
                   <div>
                     <p className="text-xs font-bold text-white uppercase">
-                      {isConnected ? 'Client Connected & Listening' : 'Waiting for Raspberry Pi Events'}
+                      {realtimeConnected
+                        ? 'Realtime WebSocket Connected'
+                        : sseConnected
+                        ? `SSE Connected (Realtime: ${realtimeStatus})`
+                        : 'Waiting for Raspberry Pi Events'}
                     </p>
                     <p className="text-[10px] text-slate-500 font-mono">
                       Board ID: {activeBoardId}
                     </p>
+                    {lastError && (
+                      <p className="text-[10px] text-rose-400 font-mono">
+                        Realtime error: {lastError}
+                      </p>
+                    )}
                     <p className="text-[10px] text-slate-500">
                       {lastEventTime
                         ? `Last event received: ${new Date(lastEventTime).toLocaleTimeString()}`

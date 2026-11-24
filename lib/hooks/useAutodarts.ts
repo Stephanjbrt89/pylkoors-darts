@@ -20,6 +20,158 @@ interface UseAutodartsOptions {
   onReset?: () => void;
 }
 
+interface ManagerState {
+  sseConnected: boolean;
+  realtimeConnected: boolean;
+  realtimeStatus: string;
+  lastError: string | null;
+}
+
+type Subscriber = {
+  onEvent: (event: AutodartsEvent) => void;
+  onState: (state: ManagerState) => void;
+};
+
+interface BoardManager {
+  boardId: string;
+  subscribers: Set<Subscriber>;
+  seenEvents: string[];
+  state: ManagerState;
+  eventSource: EventSource | null;
+  reconnectTimeout: ReturnType<typeof setTimeout> | null;
+  realtimeChannel: ReturnType<typeof supabase.channel> | null;
+  teardownTimeout: ReturnType<typeof setTimeout> | null;
+  emit: (event: AutodartsEvent) => void;
+  destroy: () => void;
+}
+
+const boardManagers = new Map<string, BoardManager>();
+
+function getOrCreateBoardManager(boardId: string): BoardManager {
+  const existing = boardManagers.get(boardId);
+  if (existing) {
+    if (existing.teardownTimeout) {
+      clearTimeout(existing.teardownTimeout);
+      existing.teardownTimeout = null;
+    }
+    return existing;
+  }
+
+  const manager: BoardManager = {
+    boardId,
+    subscribers: new Set(),
+    seenEvents: [],
+    state: {
+      sseConnected: false,
+      realtimeConnected: false,
+      realtimeStatus: 'CONNECTING',
+      lastError: null,
+    },
+    eventSource: null,
+    reconnectTimeout: null,
+    realtimeChannel: null,
+    teardownTimeout: null,
+    emit(data: AutodartsEvent) {
+      if ('eventId' in data && data.eventId) {
+        if (manager.seenEvents.includes(data.eventId)) return;
+        manager.seenEvents = [...manager.seenEvents.slice(-99), data.eventId];
+      }
+      manager.subscribers.forEach((sub) => {
+        try {
+          sub.onEvent(data);
+        } catch (err) {
+          console.error('Autodarts subscriber error:', err);
+        }
+      });
+    },
+    destroy() {
+      if (manager.reconnectTimeout) clearTimeout(manager.reconnectTimeout);
+      if (manager.eventSource) {
+        manager.eventSource.close();
+        manager.eventSource = null;
+      }
+      if (manager.realtimeChannel) {
+        supabase.removeChannel(manager.realtimeChannel).catch(() => {});
+        manager.realtimeChannel = null;
+      }
+      boardManagers.delete(boardId);
+    },
+  };
+
+  const notifyState = (patch: Partial<ManagerState>) => {
+    manager.state = { ...manager.state, ...patch };
+    manager.subscribers.forEach((sub) => sub.onState(manager.state));
+  };
+
+  function connectSSE() {
+    if (!boardManagers.has(boardId)) return;
+    try {
+      const es = new EventSource('/api/autodarts/events');
+      manager.eventSource = es;
+
+      es.onopen = () => notifyState({ sseConnected: true });
+
+      es.onmessage = (msg) => {
+        if (!msg.data) return;
+        try {
+          const data: AutodartsEvent | { type: 'CONNECTED' } = JSON.parse(msg.data);
+          if (data.type === 'CONNECTED') {
+            notifyState({ sseConnected: true });
+            return;
+          }
+          manager.emit(data);
+        } catch (err) {
+          console.error('Failed to parse Autodarts SSE event:', err);
+        }
+      };
+
+      es.onerror = () => {
+        notifyState({ sseConnected: false });
+        es.close();
+        if (boardManagers.has(boardId)) {
+          manager.reconnectTimeout = setTimeout(connectSSE, 3000);
+        }
+      };
+    } catch {
+      notifyState({ sseConnected: false });
+      manager.reconnectTimeout = setTimeout(connectSSE, 3000);
+    }
+  }
+
+  connectSSE();
+
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (supabaseUrl && supabaseKey) {
+    const channel = supabase
+      .channel(`autodarts-board:${boardId}`, {
+        config: { broadcast: { self: true } },
+      })
+      .on('broadcast', { event: 'autodarts' }, ({ payload }) => {
+        if (payload) {
+          manager.emit(payload as AutodartsEvent);
+        }
+      })
+      .subscribe((status, err) => {
+        notifyState({
+          realtimeConnected: status === 'SUBSCRIBED',
+          realtimeStatus: status,
+          lastError: err ? err.message : status === 'SUBSCRIBED' ? null : manager.state.lastError,
+        });
+      });
+
+    manager.realtimeChannel = channel;
+  } else {
+    notifyState({
+      realtimeConnected: false,
+      realtimeStatus: 'UNCONFIGURED',
+    });
+  }
+
+  boardManagers.set(boardId, manager);
+  return manager;
+}
+
 export function useAutodarts(options: UseAutodartsOptions = {}) {
   const {
     enabled = true,
@@ -30,20 +182,23 @@ export function useAutodarts(options: UseAutodartsOptions = {}) {
     onReset,
   } = options;
 
-  const [sseConnected, setSseConnected] = useState<boolean>(false);
-  const [realtimeConnected, setRealtimeConnected] = useState<boolean>(false);
+  const [transportState, setTransportState] = useState<ManagerState>({
+    sseConnected: false,
+    realtimeConnected: false,
+    realtimeStatus: 'CONNECTING',
+    lastError: null,
+  });
   const [lastThrow, setLastThrow] = useState<Dart | null>(null);
   const [lastEventTime, setLastEventTime] = useState<number | null>(null);
   const [activeBoardId, setActiveBoardId] = useState<string>(boardId);
 
-  const isConnected = sseConnected || realtimeConnected;
+  const isConnected = transportState.realtimeConnected || transportState.sseConnected;
 
-  // Store latest callbacks in refs to prevent reconnecting transports on handler updates
+  // Store latest callbacks in refs to avoid resubscribing on state renders
   const onThrowRef = useRef(onThrow);
   const onTakeoutRef = useRef(onTakeout);
   const onResetRef = useRef(onReset);
   const matchIdRef = useRef(matchId);
-  const seenEventsRef = useRef<string[]>([]);
 
   useEffect(() => {
     onThrowRef.current = onThrow;
@@ -52,121 +207,61 @@ export function useAutodarts(options: UseAutodartsOptions = {}) {
     matchIdRef.current = matchId;
   });
 
-  const handleIncomingEvent = useCallback((data: AutodartsEvent | { type: 'CONNECTED' }) => {
-    if (data.type === 'CONNECTED') {
-      setSseConnected(true);
-      return;
-    }
-
-    // Deduplicate across SSE and Supabase Realtime dual-transport
-    if ('eventId' in data && data.eventId) {
-      if (seenEventsRef.current.includes(data.eventId)) {
-        return;
-      }
-      seenEventsRef.current = [...seenEventsRef.current.slice(-49), data.eventId];
-    }
-
-    // Filter by matchId if specific match was passed in options and in payload
-    if (
-      matchIdRef.current &&
-      'matchId' in data &&
-      data.matchId &&
-      data.matchId !== matchIdRef.current
-    ) {
-      return;
-    }
-
-    setLastEventTime(Date.now());
-    if ('boardId' in data && data.boardId) {
-      setActiveBoardId(data.boardId);
-    }
-
-    if (data.type === 'THROW') {
-      const dart = autodartsPayloadToDart(data);
-      setLastThrow(dart);
-      onThrowRef.current?.(dart, data);
-    } else if (data.type === 'TAKEOUT') {
-      onTakeoutRef.current?.();
-    } else if (data.type === 'RESET' || data.type === 'UNDO') {
-      onResetRef.current?.();
-    }
-  }, []);
-
   useEffect(() => {
     if (!enabled || typeof window === 'undefined') return;
 
-    let eventSource: EventSource | null = null;
-    let reconnectTimeout: ReturnType<typeof setTimeout>;
-    let isDisposed = false;
+    let cancelled = false;
+    const manager = getOrCreateBoardManager(boardId);
 
-    function connectSSE() {
-      if (isDisposed) return;
-      try {
-        eventSource = new EventSource('/api/autodarts/events');
+    const subscriber: Subscriber = {
+      onState: (next) => {
+        if (!cancelled) setTransportState(next);
+      },
+      onEvent: (data) => {
+        if (
+          matchIdRef.current &&
+          'matchId' in data &&
+          data.matchId &&
+          data.matchId !== matchIdRef.current
+        ) {
+          return;
+        }
 
-        eventSource.onopen = () => {
-          if (!isDisposed) setSseConnected(true);
-        };
+        setLastEventTime(Date.now());
+        if ('boardId' in data && data.boardId) {
+          setActiveBoardId(data.boardId);
+        }
 
-        eventSource.onmessage = (event) => {
-          if (!event.data || isDisposed) return;
-          try {
-            const data: AutodartsEvent | { type: 'CONNECTED' } = JSON.parse(event.data);
-            handleIncomingEvent(data);
-          } catch (err) {
-            console.error('Failed to parse incoming Autodarts SSE event:', err);
-          }
-        };
+        if (data.type === 'THROW') {
+          const dart = autodartsPayloadToDart(data);
+          setLastThrow(dart);
+          onThrowRef.current?.(dart, data);
+        } else if (data.type === 'TAKEOUT') {
+          onTakeoutRef.current?.();
+        } else if (data.type === 'RESET' || data.type === 'UNDO') {
+          onResetRef.current?.();
+        }
+      },
+    };
 
-        eventSource.onerror = () => {
-          if (isDisposed) return;
-          setSseConnected(false);
-          eventSource?.close();
-          reconnectTimeout = setTimeout(connectSSE, 3000);
-        };
-      } catch (err) {
-        console.error('EventSource initialization error:', err);
-        setSseConnected(false);
-        reconnectTimeout = setTimeout(connectSSE, 3000);
-      }
-    }
-
-    connectSSE();
-
-    // Also subscribe to Supabase Realtime Broadcast for Vercel serverless multi-instance delivery
-    let realtimeChannel: ReturnType<typeof supabase.channel> | null = null;
-    const hasSupabase =
-      Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL) &&
-      Boolean(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
-
-    if (hasSupabase) {
-      realtimeChannel = supabase
-        .channel(`autodarts-board:${boardId}`)
-        .on('broadcast', { event: 'autodarts' }, ({ payload }) => {
-          if (!isDisposed && payload) {
-            handleIncomingEvent(payload as AutodartsEvent);
-          }
-        })
-        .subscribe((status) => {
-          if (!isDisposed) {
-            setRealtimeConnected(status === 'SUBSCRIBED');
-          }
-        });
-    }
+    manager.subscribers.add(subscriber);
+    queueMicrotask(() => {
+      if (!cancelled) setTransportState(manager.state);
+    });
 
     return () => {
-      isDisposed = true;
-      clearTimeout(reconnectTimeout);
-      eventSource?.close();
-      setSseConnected(false);
-      setRealtimeConnected(false);
-      if (realtimeChannel) {
-        supabase.removeChannel(realtimeChannel).catch(() => {});
+      cancelled = true;
+      manager.subscribers.delete(subscriber);
+      if (manager.subscribers.size === 0) {
+        manager.teardownTimeout = setTimeout(() => {
+          if (manager.subscribers.size === 0) {
+            manager.destroy();
+          }
+        }, 1500);
       }
     };
-  }, [enabled, boardId, handleIncomingEvent]);
+  }, [enabled, boardId]);
 
-  // Client-side testing helper to fire simulated throws into the pipeline
   const simulateThrow = useCallback(
     async (segment: string, dartIndex: 1 | 2 | 3 = 1) => {
       try {
@@ -180,7 +275,11 @@ export function useAutodarts(options: UseAutodartsOptions = {}) {
             matchId: matchIdRef.current,
           }),
         });
-        return await res.json();
+        const json = await res.json();
+        if (json?.event) {
+          boardManagers.get(boardId)?.emit(json.event as AutodartsEvent);
+        }
+        return json;
       } catch (err) {
         console.error('Simulate throw failed:', err);
       }
@@ -199,7 +298,11 @@ export function useAutodarts(options: UseAutodartsOptions = {}) {
           matchId: matchIdRef.current,
         }),
       });
-      return await res.json();
+      const json = await res.json();
+      if (json?.event) {
+        boardManagers.get(boardId)?.emit(json.event as AutodartsEvent);
+      }
+      return json;
     } catch (err) {
       console.error('Simulate takeout failed:', err);
     }
@@ -207,6 +310,10 @@ export function useAutodarts(options: UseAutodartsOptions = {}) {
 
   return {
     isConnected,
+    sseConnected: transportState.sseConnected,
+    realtimeConnected: transportState.realtimeConnected,
+    realtimeStatus: transportState.realtimeStatus,
+    lastError: transportState.lastError,
     lastThrow,
     lastEventTime,
     activeBoardId,

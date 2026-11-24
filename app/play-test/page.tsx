@@ -60,17 +60,17 @@ export default function X01PlayTest() {
     setCurrentTurnIndex((prev) => (prev + 1) % activePlayers.length);
   };
 
-  // Autodarts Real-Time Hardware Bridge
+  // Autodarts Real-Time Hardware Bridge (pre-connects during squad/target selection)
   useAutodarts({
-    enabled: !!matchId && !isWin,
+    enabled: !isWin,
     matchId: matchId || undefined,
     onThrow: (dart) => {
-      if (!isTransitioningRef.current && !isWin) {
+      if (matchId && !isTransitioningRef.current && !isWin) {
         handleThrow(dart.score, dart.multiplier, dart.raw);
       }
     },
     onTakeout: () => {
-      if (!isTransitioningRef.current && !isWin && dartsThrown.length > 0) {
+      if (matchId && !isTransitioningRef.current && !isWin && dartsThrown.length > 0) {
         endTurnManually();
       }
     },

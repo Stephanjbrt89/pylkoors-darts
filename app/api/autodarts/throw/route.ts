@@ -7,21 +7,69 @@ import { AutodartsEvent, AutodartsThrowPayload, DEFAULT_AUTODARTS_BOARD_ID } fro
 
 export const dynamic = 'force-dynamic';
 
-async function broadcastToSupabase(boardId: string, event: AutodartsEvent) {
+async function broadcastToSupabase(
+  boardId: string,
+  event: AutodartsEvent
+): Promise<{ ok: boolean; status?: number; error?: string }> {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!supabaseUrl || !supabaseKey) return;
+  if (!supabaseUrl || !supabaseKey) {
+    return { ok: false, error: 'Supabase env not configured' };
+  }
 
-  const client = createClient(supabaseUrl, supabaseKey, {
-    auth: { persistSession: false },
-  });
-  const channel = client.channel(`autodarts-board:${boardId}`);
+  const baseUrl = supabaseUrl.replace(/\/$/, '');
   try {
-    await channel.httpSend('autodarts', event, { timeout: 1500 });
-  } catch (err) {
-    console.warn('Supabase Realtime broadcast skipped:', err);
-  } finally {
-    await client.removeChannel(channel).catch(() => {});
+    const res = await fetch(`${baseUrl}/realtime/v1/api/broadcast`, {
+      method: 'POST',
+      headers: {
+        apikey: supabaseKey,
+        Authorization: `Bearer ${supabaseKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        messages: [
+          {
+            topic: `autodarts-board:${boardId}`,
+            event: 'autodarts',
+            payload: event,
+            private: false,
+          },
+        ],
+      }),
+      signal: AbortSignal.timeout(2000),
+    });
+
+    if (res.ok) {
+      return { ok: true, status: res.status };
+    }
+
+    const errText = await res.text().catch(() => '');
+    console.warn('Supabase REST broadcast failed:', res.status, errText);
+
+    // Fallback to supabase-js httpSend
+    const client = createClient(supabaseUrl, supabaseKey, {
+      auth: { persistSession: false },
+    });
+    const channel = client.channel(`autodarts-board:${boardId}`);
+    try {
+      await channel.httpSend('autodarts', event, { timeout: 1500 });
+      return { ok: true, status: 202 };
+    } catch (fallbackErr: unknown) {
+      const fallbackMessage = fallbackErr instanceof Error ? fallbackErr.message : '';
+      return {
+        ok: false,
+        status: res.status,
+        error: fallbackMessage || errText || `HTTP ${res.status}`,
+      };
+    } finally {
+      await client.removeChannel(channel).catch(() => {});
+    }
+  } catch (err: unknown) {
+    console.warn('Supabase Realtime broadcast exception:', err);
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : 'Broadcast request failed',
+    };
   }
 }
 
@@ -53,8 +101,8 @@ export async function POST(req: NextRequest) {
         timestamp: Date.now(),
       };
       autodartsBus.dispatch(takeoutEvent, boardId);
-      await broadcastToSupabase(boardId, takeoutEvent);
-      return NextResponse.json({ ok: true, event: takeoutEvent });
+      const realtime = await broadcastToSupabase(boardId, takeoutEvent);
+      return NextResponse.json({ ok: true, event: takeoutEvent, realtime });
     }
 
     // 3. Handle Reset / Undo Event
@@ -67,8 +115,8 @@ export async function POST(req: NextRequest) {
         timestamp: Date.now(),
       };
       autodartsBus.dispatch(resetEvent, boardId);
-      await broadcastToSupabase(boardId, resetEvent);
-      return NextResponse.json({ ok: true, event: resetEvent });
+      const realtime = await broadcastToSupabase(boardId, resetEvent);
+      return NextResponse.json({ ok: true, event: resetEvent, realtime });
     }
 
     // 4. Handle Standard Dart Throw Event (accepts segment, segmentName, or bed)
@@ -114,17 +162,21 @@ export async function POST(req: NextRequest) {
     };
 
     autodartsBus.dispatch(fullEvent, boardId);
-    await broadcastToSupabase(boardId, fullEvent);
+    const realtime = await broadcastToSupabase(boardId, fullEvent);
 
     return NextResponse.json({
       ok: true,
       dart,
       event: fullEvent,
+      realtime,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Failed to process Autodarts webhook throw:', error);
     return NextResponse.json(
-      { error: 'Invalid throw payload', details: error?.message },
+      {
+        error: 'Invalid throw payload',
+        details: error instanceof Error ? error.message : String(error),
+      },
       { status: 400 }
     );
   }
