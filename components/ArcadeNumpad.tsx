@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { RotateCcw } from 'lucide-react';
 import { Dart } from '@/types/schema';
 
@@ -36,19 +36,22 @@ export const ArcadeNumpad = ({
   useEffect(() => { if (onToggle) onToggle(isExpanded); }, [isExpanded, onToggle]);
 
   const addDigit = (digit: string) => {
-    const nextValue = pendingNum + digit;
-    const num = parseInt(nextValue);
-    if (num > 20 && num !== 25 && nextValue.length >= 2) return;
-    if (nextValue.length > 2) return;
-    setPendingNum(nextValue);
+    setPendingNum((prev) => {
+      const nextValue = prev + digit;
+      const num = parseInt(nextValue, 10);
+      if (num > 20 && num !== 25 && nextValue.length >= 2) return prev;
+      if (nextValue.length > 2) return prev;
+      return nextValue;
+    });
   };
 
-  const handleAction = (multiplier: number, overrideLabel?: string) => {
-    const score = parseInt(pendingNum) || 0;
+  const handleAction = (multiplier: number, overrideLabel?: string, scoreOverride?: string) => {
+    const rawVal = scoreOverride !== undefined ? scoreOverride : pendingNum;
+    const score = parseInt(rawVal, 10) || 0;
     if (score === 25 && multiplier === 3) return; // Illegal Triple Bull
 
-    if (multiplier === -1 || multiplier === 0) {
-      onThrow(0, multiplier, overrideLabel || "MISS");
+    if (multiplier === -1 || multiplier === 0 || score === 0) {
+      onThrow(0, multiplier === -1 ? -1 : 0, overrideLabel || "MISS");
     } else if (score === 25) {
       if (multiplier === 2) onThrow(25, 2, "D-BULL");
       else onThrow(25, 1, "BULL");
@@ -58,12 +61,101 @@ export const ArcadeNumpad = ({
     setPendingNum("");
   };
 
-  const handleUndoClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
+  const handleUndoClick = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
     if (!canUndo || !onUndo) return;
     onUndo();
     setIsExpanded(true);
   };
+
+  const keyHandlerRef = useRef<(e: KeyboardEvent) => void>(() => {});
+  useEffect(() => {
+    keyHandlerRef.current = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+
+      const key = e.key;
+      if (/^[0-9]$/.test(key)) {
+        e.preventDefault();
+        setIsExpanded(true);
+        addDigit(key);
+        return;
+      }
+
+      if (key === 'Backspace') {
+        if (pendingNum.length > 0) {
+          e.preventDefault();
+          setPendingNum((prev) => prev.slice(0, -1));
+        }
+        return;
+      }
+
+      if (key === 'Escape') {
+        if (pendingNum.length > 0) {
+          e.preventDefault();
+          setPendingNum('');
+        } else if (isExpanded) {
+          e.preventDefault();
+          setIsExpanded(false);
+        }
+        return;
+      }
+
+      const lower = key.toLowerCase();
+      if (lower === 'b') {
+        e.preventDefault();
+        setIsExpanded(true);
+        setPendingNum('25');
+        return;
+      }
+
+      if (lower === 'm') {
+        e.preventDefault();
+        handleAction(0, 'MISS', '0');
+        return;
+      }
+
+      if (lower === 'u' || lower === 'z') {
+        if (canUndo && onUndo) {
+          e.preventDefault();
+          handleUndoClick();
+        }
+        return;
+      }
+
+      if ((key === 'Enter' || lower === 's') && pendingNum.length > 0) {
+        e.preventDefault();
+        handleAction(1);
+        return;
+      }
+
+      if (lower === 'd' && pendingNum.length > 0) {
+        e.preventDefault();
+        handleAction(2);
+        return;
+      }
+
+      if (lower === 't' && pendingNum.length > 0 && pendingNum !== '25') {
+        e.preventDefault();
+        handleAction(3);
+      }
+    };
+  });
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => keyHandlerRef.current(e);
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   return (
     <div 
@@ -109,7 +201,7 @@ export const ArcadeNumpad = ({
             <button
               onClick={handleUndoClick}
               disabled={!canUndo}
-              title="Undo previous dart so you can re-enter it"
+              title="Undo previous dart (U)"
               className={`flex items-center gap-1 text-[8px] font-black uppercase px-2 py-1 rounded border transition-all ${
                 canUndo
                   ? 'text-amber-300 border-amber-500/50 bg-amber-500/15 hover:bg-amber-500/30 active:scale-95'
@@ -126,7 +218,7 @@ export const ArcadeNumpad = ({
 
       {/* EXPANDABLE CONSOLE */}
       <div className={`flex flex-col items-center w-full transition-all duration-500 overflow-hidden ${
-        isExpanded ? 'opacity-100 max-h-[400px] mb-2' : 'opacity-0 max-h-0'
+        isExpanded ? 'opacity-100 max-h-[420px] mb-2' : 'opacity-0 max-h-0'
       }`}>
         <div className="flex gap-4 items-center justify-center w-full">
             <div className="w-20 h-14 bg-slate-900 border-2 border-white/10 rounded-xl flex items-center justify-center text-3xl font-black text-white shadow-inner">{pendingNum || "00"}</div>
@@ -137,24 +229,28 @@ export const ArcadeNumpad = ({
                 <button onClick={() => setPendingNum("25")} className="w-10 h-10 bg-white text-black rounded-lg font-black text-[9px] border-b-2 border-slate-400">BULL</button>
             </div>
             <div className="flex flex-col gap-1">
-                <button onClick={() => handleAction(1)} className="w-24 py-3 bg-slate-700 rounded-lg font-black text-[9px] uppercase italic">Single</button>
-                <button onClick={() => handleAction(2)} className="w-24 py-3 bg-blue-600 rounded-lg font-black text-[9px] uppercase italic">Double</button>
-                <button onClick={() => handleAction(3)} disabled={pendingNum === "25"} className={`w-24 py-3 rounded-lg font-black text-[9px] uppercase italic ${pendingNum === "25" ? 'bg-slate-900 text-slate-700' : 'bg-red-600 text-white'}`}>Triple</button>
+                <button onClick={() => handleAction(1)} className="w-24 py-3 bg-slate-700 rounded-lg font-black text-[9px] uppercase italic">Single (S/↵)</button>
+                <button onClick={() => handleAction(2)} className="w-24 py-3 bg-blue-600 rounded-lg font-black text-[9px] uppercase italic">Double (D)</button>
+                <button onClick={() => handleAction(3)} disabled={pendingNum === "25"} className={`w-24 py-3 rounded-lg font-black text-[9px] uppercase italic ${pendingNum === "25" ? 'bg-slate-900 text-slate-700' : 'bg-red-600 text-white'}`}>Triple (T)</button>
             </div>
         </div>
+
+        <p className="mt-1.5 text-[9px] text-slate-500 font-mono text-center">
+          Keys: 0–9 · B Bull · M Miss · ↵/S Single · D Double · T Triple · U Undo
+        </p>
 
         {onUndo && (
           <button
             onClick={handleUndoClick}
             disabled={!canUndo}
-            className={`mt-2 w-full py-1.5 rounded-xl border text-[10px] font-black uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all ${
+            className={`mt-1.5 w-full py-1.5 rounded-xl border text-[10px] font-black uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all ${
               canUndo
                 ? 'bg-amber-500/15 border-amber-500/40 text-amber-300 hover:bg-amber-500/25 active:scale-[0.99]'
                 : 'bg-slate-900/40 border-white/5 text-slate-600 cursor-not-allowed'
             }`}
           >
             <RotateCcw className="w-3 h-3" />
-            Undo Previous Dart (Fix Misread)
+            Undo Previous Dart (U)
           </button>
         )}
 

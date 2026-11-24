@@ -86,6 +86,7 @@ export default function HalfeertjiesPage() {
             SoundService.play('bust');
             setReactionUrl(GifService.getRandomGifUrl('BUST'));
         } else if (['TARGET_SCORE', 'ANY_TRIPLE', 'ANY_DOUBLE', 'BULL'].includes(String(currentTarget.type))) {
+            SoundService.play('180');
             setReactionUrl(GifService.getRandomGifUrl('BOOM'));
         }
     }

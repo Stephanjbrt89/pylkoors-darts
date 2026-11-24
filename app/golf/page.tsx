@@ -85,7 +85,10 @@ export default function GolfPage() {
         const playerRecap = nextState.players[lastPlayerIdx];
         const lastHoleScore = playerRecap.holeScores[gameState.currentHole];
         
-        if (lastHoleScore < 0) setReactionUrl(GifService.getRandomGifUrl('BOOM'));
+        if (lastHoleScore < 0) {
+          SoundService.play('180');
+          setReactionUrl(GifService.getRandomGifUrl('BOOM'));
+        }
         triggerTurnRecap(playerRecap);
     }
 
