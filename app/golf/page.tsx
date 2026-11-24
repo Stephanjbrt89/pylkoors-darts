@@ -30,6 +30,7 @@ export default function GolfPage() {
   const [reactionUrl, setReactionUrl] = useState<string | null>(null);
   const [recordData, setRecordData] = useState<any>(null);
   const [showStatsOverlay, setShowStatsOverlay] = useState<any | null>(null);
+  const [history, setHistory] = useState<GolfState[]>([]);
   const router = useRouter();
 
   const handleSquadConfirmed = (players: any[]) => {
@@ -54,8 +55,19 @@ export default function GolfPage() {
     setTimeout(() => { setShowStatsOverlay(null); }, 4000);
   };
 
+  const handleUndo = () => {
+    if (history.length === 0 || !matchId) return;
+    const prevSnap = history[history.length - 1];
+    setHistory((prev) => prev.slice(0, -1));
+    setGameState(prevSnap);
+    setShowStatsOverlay(null);
+    setReactionUrl(null);
+    void ArcadeService.saveGameState(matchId, prevSnap);
+  };
+
   const onThrow = async (score: number, multiplier: number, label: string) => {
     if (!gameState || !matchId || gameState.isFinished) return;
+    setHistory((prev) => [...prev.slice(-29), gameState]);
 
     if (score === 50 || (score === 25 && multiplier === 2)) {
         SoundService.play('win');
@@ -97,6 +109,7 @@ export default function GolfPage() {
 
   const bankTurn = async () => {
     if (!gameState || !matchId || gameState.currentVisitDarts.length === 0) return;
+    setHistory((prev) => [...prev.slice(-29), gameState]);
     const playerBanking = gameState.players[gameState.currentTurnIndex];
     const nextState = GolfEngine.bankAndAdvance(gameState);
     
@@ -201,7 +214,19 @@ export default function GolfPage() {
       </div>
 
       <div className="w-full flex justify-center z-30">
-          <ArcadeNumpad activeGooierName={currentPlayer.username} dartsThrownCount={gameState.currentVisitDarts.length} dartsStatus={dartsStatus} onThrow={onThrow} onEndTurn={bankTurn} onToggle={setIsPadExpanded} color="#10b981" showGolfHazards={true} />
+          <ArcadeNumpad
+            activeGooierName={currentPlayer.username}
+            dartsThrownCount={gameState.currentVisitDarts.length}
+            lastDarts={gameState.currentVisitDarts}
+            dartsStatus={dartsStatus}
+            canUndo={history.length > 0}
+            onUndo={handleUndo}
+            onThrow={onThrow}
+            onEndTurn={bankTurn}
+            onToggle={setIsPadExpanded}
+            color="#10b981"
+            showGolfHazards={true}
+          />
       </div>
 
       {showStatsOverlay && (

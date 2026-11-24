@@ -1,10 +1,15 @@
 'use client';
 import { useState, useEffect } from 'react';
+import { RotateCcw } from 'lucide-react';
+import { Dart } from '@/types/schema';
 
 interface Props {
   activeGooierName: string;
   dartsThrownCount: number;
+  lastDarts?: Dart[];
   dartsStatus?: ('hit' | 'miss' | 'none')[];
+  canUndo?: boolean;
+  onUndo?: () => void;
   onThrow: (score: number, multiplier: number, label: string) => void;
   onEndTurn: () => void;
   onToggle?: (expanded: boolean) => void;
@@ -12,7 +17,19 @@ interface Props {
   showGolfHazards?: boolean;
 }
 
-export const ArcadeNumpad = ({ activeGooierName, dartsThrownCount, dartsStatus = [], onThrow, onEndTurn, onToggle, color = "#ef4444", showGolfHazards }: Props) => {
+export const ArcadeNumpad = ({
+  activeGooierName,
+  dartsThrownCount,
+  lastDarts = [],
+  dartsStatus = [],
+  canUndo = false,
+  onUndo,
+  onThrow,
+  onEndTurn,
+  onToggle,
+  color = "#ef4444",
+  showGolfHazards,
+}: Props) => {
   const [pendingNum, setPendingNum] = useState("");
   const [isExpanded, setIsExpanded] = useState(false);
 
@@ -27,11 +44,11 @@ export const ArcadeNumpad = ({ activeGooierName, dartsThrownCount, dartsStatus =
   };
 
   const handleAction = (multiplier: number, overrideLabel?: string) => {
-    let score = parseInt(pendingNum) || 0;
+    const score = parseInt(pendingNum) || 0;
     if (score === 25 && multiplier === 3) return; // Illegal Triple Bull
 
     if (multiplier === -1 || multiplier === 0) {
-        onThrow(0, multiplier, overrideLabel || "MISS");
+      onThrow(0, multiplier, overrideLabel || "MISS");
     } else if (score === 25) {
       if (multiplier === 2) onThrow(25, 2, "D-BULL");
       else onThrow(25, 1, "BULL");
@@ -39,6 +56,13 @@ export const ArcadeNumpad = ({ activeGooierName, dartsThrownCount, dartsStatus =
       onThrow(score, multiplier, `${multiplier === 3 ? 'T' : multiplier === 2 ? 'D' : 'S'}${score}`);
     }
     setPendingNum("");
+  };
+
+  const handleUndoClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!canUndo || !onUndo) return;
+    onUndo();
+    setIsExpanded(true);
   };
 
   return (
@@ -49,21 +73,55 @@ export const ArcadeNumpad = ({ activeGooierName, dartsThrownCount, dartsStatus =
       style={{ borderColor: color, height: isExpanded ? 'auto' : '55px' }}
     >
       {/* TOGGLE HANDLE */}
-      <div onClick={() => setIsExpanded(!isExpanded)} className="w-full flex items-center justify-between cursor-pointer py-3">
-        <div className="flex gap-1.5">
-          {[0, 1, 2].map((i) => (
-            <div key={i} className={`w-5 h-5 rounded-full flex items-center justify-center border transition-all ${
-              dartsStatus[i] === 'hit' ? 'bg-green-500' : dartsStatus[i] === 'miss' ? 'bg-red-600' : 'bg-transparent border-white/10'
-            }`}>
-              {i < dartsThrownCount && <span className="text-[8px]">🎯</span>}
-            </div>
-          ))}
+      <div onClick={() => setIsExpanded(!isExpanded)} className="w-full flex items-center justify-between cursor-pointer py-3 gap-2">
+        <div className="flex gap-1.5 items-center">
+          {[0, 1, 2].map((i) => {
+            const dart = lastDarts[i];
+            const hasDart = i < dartsThrownCount || Boolean(dart);
+            return (
+              <div
+                key={i}
+                className={`h-5 min-w-[20px] ${dart ? 'px-1.5' : 'w-5'} rounded-full flex items-center justify-center border transition-all ${
+                  dartsStatus[i] === 'hit'
+                    ? 'bg-emerald-500 border-emerald-300 text-black shadow-[0_0_8px_rgba(16,185,129,0.6)]'
+                    : dartsStatus[i] === 'miss'
+                    ? 'bg-red-600 border-red-400 text-white shadow-[0_0_8px_rgba(220,38,38,0.6)]'
+                    : hasDart
+                    ? 'bg-cyan-400 border-cyan-200 text-black shadow-[0_0_8px_rgba(34,211,238,0.6)]'
+                    : 'bg-white/5 border-white/20 text-white/30'
+                }`}
+              >
+                {dart ? (
+                  <span className="text-[9px] font-black font-mono leading-none">{dart.raw}</span>
+                ) : (
+                  hasDart && <span className="w-2 h-2 rounded-full bg-black" />
+                )}
+              </div>
+            );
+          })}
         </div>
-        <div className="flex flex-col items-center">
-            <div className={`w-10 h-1 rounded-full mb-0.5 ${isExpanded ? 'bg-white/10' : 'bg-white animate-pulse'}`} />
-            <p className="text-[9px] font-black uppercase text-cyan-400 tracking-widest">{activeGooierName}</p>
+        <div className="flex flex-col items-center min-w-0">
+          <div className={`w-10 h-1 rounded-full mb-0.5 ${isExpanded ? 'bg-white/10' : 'bg-white animate-pulse'}`} />
+          <p className="text-[9px] font-black uppercase text-cyan-400 tracking-widest truncate max-w-[140px]">{activeGooierName}</p>
         </div>
-        <button onClick={(e) => { e.stopPropagation(); onEndTurn(); }} className="text-[8px] font-black uppercase text-white/30 border border-white/10 px-2 py-1 rounded">END</button>
+        <div className="flex items-center gap-1.5 shrink-0">
+          {onUndo && (
+            <button
+              onClick={handleUndoClick}
+              disabled={!canUndo}
+              title="Undo previous dart so you can re-enter it"
+              className={`flex items-center gap-1 text-[8px] font-black uppercase px-2 py-1 rounded border transition-all ${
+                canUndo
+                  ? 'text-amber-300 border-amber-500/50 bg-amber-500/15 hover:bg-amber-500/30 active:scale-95'
+                  : 'text-white/20 border-white/5 cursor-not-allowed'
+              }`}
+            >
+              <RotateCcw className="w-2.5 h-2.5" />
+              UNDO
+            </button>
+          )}
+          <button onClick={(e) => { e.stopPropagation(); onEndTurn(); }} className="text-[8px] font-black uppercase text-white/40 hover:text-white border border-white/10 px-2 py-1 rounded">END</button>
+        </div>
       </div>
 
       {/* EXPANDABLE CONSOLE */}
@@ -85,8 +143,23 @@ export const ArcadeNumpad = ({ activeGooierName, dartsThrownCount, dartsStatus =
             </div>
         </div>
 
+        {onUndo && (
+          <button
+            onClick={handleUndoClick}
+            disabled={!canUndo}
+            className={`mt-2 w-full py-1.5 rounded-xl border text-[10px] font-black uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all ${
+              canUndo
+                ? 'bg-amber-500/15 border-amber-500/40 text-amber-300 hover:bg-amber-500/25 active:scale-[0.99]'
+                : 'bg-slate-900/40 border-white/5 text-slate-600 cursor-not-allowed'
+            }`}
+          >
+            <RotateCcw className="w-3 h-3" />
+            Undo Previous Dart (Fix Misread)
+          </button>
+        )}
+
         {showGolfHazards && (
-            <div className="grid grid-cols-2 gap-2 w-full mt-3">
+            <div className="grid grid-cols-2 gap-2 w-full mt-2">
                 <button onClick={() => handleAction(-1, 'BUNKER')} className="bg-amber-700 p-2 rounded-xl font-black text-[10px] italic">BUNKER (+2)</button>
                 <button onClick={() => handleAction(0, 'WATER')} className="bg-blue-800 p-2 rounded-xl font-black text-[10px] italic">WATER (+3)</button>
             </div>

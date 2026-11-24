@@ -25,6 +25,7 @@ export default function BrandySpecialPage() {
   const [reactionUrl, setReactionUrl] = useState<string | null>(null);
   const [recordData, setRecordData] = useState<any>(null);
   const [isPadExpanded, setIsPadExpanded] = useState(false);
+  const [history, setHistory] = useState<BrandyState[]>([]);
   const router = useRouter();
 
   const handleStartGame = async (selectedPlayers: any[]) => {
@@ -49,8 +50,30 @@ export default function BrandySpecialPage() {
     }
   };
 
+  const handleUndo = () => {
+    if (history.length === 0 || !matchId) return;
+    const prevSnap = history[history.length - 1];
+    setHistory((prev) => prev.slice(0, -1));
+    setGameState(prevSnap);
+    setReactionUrl(null);
+    void ArcadeService.saveGameState(matchId, prevSnap);
+  };
+
+  const handleEndTurn = () => {
+    if (!gameState || !matchId || gameState.phase !== 'PLAY' || gameState.isFinished) return;
+    setHistory((prev) => [...prev.slice(-29), gameState]);
+    const nextState = {
+      ...gameState,
+      currentTurnIndex: (gameState.currentTurnIndex + 1) % gameState.players.length,
+      dartsThrown: [],
+    };
+    setGameState(nextState);
+    void ArcadeService.saveGameState(matchId, nextState);
+  };
+
   const onThrow = async (score: number, multiplier: number, label: string) => {
     if (!gameState || !matchId || gameState.phase !== 'PLAY' || gameState.isFinished) return;
+    setHistory((prev) => [...prev.slice(-29), gameState]);
     
     const nextState = BrandyEngine.handleThrow(gameState, { score, multiplier, raw: label });
 
@@ -82,14 +105,8 @@ export default function BrandySpecialPage() {
       void onThrow(dart.score, dart.multiplier, dart.raw);
     },
     onTakeout: () => {
-      if (gameState && matchId && gameState.phase === 'PLAY' && gameState.dartsThrown.length > 0 && !gameState.isFinished) {
-        const nextState = {
-          ...gameState,
-          currentTurnIndex: (gameState.currentTurnIndex + 1) % gameState.players.length,
-          dartsThrown: [],
-        };
-        setGameState(nextState);
-        void ArcadeService.saveGameState(matchId, nextState);
+      if (gameState && gameState.dartsThrown.length > 0 && !gameState.isFinished) {
+        handleEndTurn();
       }
     },
   });
@@ -162,7 +179,17 @@ export default function BrandySpecialPage() {
       {/* 3. CONSOLE */}
       {!gameState.isFinished && (
         <div className="w-full flex justify-center z-30">
-          <ArcadeNumpad activeGooierName={currentPlayer.username} dartsThrownCount={gameState.dartsThrown.length} onThrow={onThrow} onEndTurn={() => setGameState({...gameState, currentTurnIndex: (gameState.currentTurnIndex + 1) % gameState.players.length, dartsThrown: []})} onToggle={setIsPadExpanded} color="#f59e0b" />
+          <ArcadeNumpad
+            activeGooierName={currentPlayer.username}
+            dartsThrownCount={gameState.dartsThrown.length}
+            lastDarts={gameState.dartsThrown}
+            canUndo={history.length > 0}
+            onUndo={handleUndo}
+            onThrow={onThrow}
+            onEndTurn={handleEndTurn}
+            onToggle={setIsPadExpanded}
+            color="#f59e0b"
+          />
         </div>
       )}
 

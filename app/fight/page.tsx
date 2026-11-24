@@ -26,6 +26,7 @@ export default function FightGamePage() {
   const [impactData, setImpactData] = useState<{ val: number } | null>(null);
   const [selectedSquad, setSelectedSquad] = useState<any[]>([]);
   const [isPadExpanded, setIsPadExpanded] = useState(false);
+  const [history, setHistory] = useState<FightState[]>([]);
   const router = useRouter();
 
   const handleStartGame = async (selectedPlayers: any[]) => {
@@ -44,8 +45,35 @@ export default function FightGamePage() {
     } catch (err) { console.error(err); }
   };
 
+  const handleUndo = () => {
+    if (history.length === 0 || !matchId) return;
+    const prevSnap = history[history.length - 1];
+    setHistory((prev) => prev.slice(0, -1));
+    setGameState(prevSnap);
+    setImpactPlayerId(null);
+    setHealPlayerId(null);
+    setImpactData(null);
+    setReactionUrl(null);
+    void ArcadeService.saveGameState(matchId, prevSnap);
+  };
+
+  const handleEndTurn = () => {
+    if (!gameState || !matchId || gameState.phase !== 'PLAY' || gameState.isFinished) return;
+    setHistory((prev) => [...prev.slice(-29), gameState]);
+    let nextIdx = (gameState.currentTurnIndex + 1) % gameState.players.length;
+    let guard = 0;
+    while (gameState.players[nextIdx]?.isEliminated && guard < gameState.players.length) {
+      nextIdx = (nextIdx + 1) % gameState.players.length;
+      guard++;
+    }
+    const nextState = { ...gameState, currentTurnIndex: nextIdx, dartsThrown: [] };
+    setGameState(nextState);
+    void ArcadeService.saveGameState(matchId, nextState);
+  };
+
   const handleThrow = async (score: number, multiplier: number, label: string) => {
     if (!gameState || !matchId || gameState.isFinished) return;
+    setHistory((prev) => [...prev.slice(-29), gameState]);
     const nextState = FightEngine.handleThrow(gameState, { score, multiplier, raw: label });
 
     if (nextState.lastAction?.type === 'DAMAGE') {
@@ -77,16 +105,8 @@ export default function FightGamePage() {
       void handleThrow(dart.score, dart.multiplier, dart.raw);
     },
     onTakeout: () => {
-      if (gameState && matchId && gameState.phase === 'PLAY' && gameState.dartsThrown.length > 0 && !gameState.isFinished) {
-        let nextIdx = (gameState.currentTurnIndex + 1) % gameState.players.length;
-        let guard = 0;
-        while (gameState.players[nextIdx]?.isEliminated && guard < gameState.players.length) {
-          nextIdx = (nextIdx + 1) % gameState.players.length;
-          guard++;
-        }
-        const nextState = { ...gameState, currentTurnIndex: nextIdx, dartsThrown: [] };
-        setGameState(nextState);
-        void ArcadeService.saveGameState(matchId, nextState);
+      if (gameState && gameState.dartsThrown.length > 0 && !gameState.isFinished) {
+        handleEndTurn();
       }
     },
   });
@@ -127,7 +147,17 @@ export default function FightGamePage() {
 
       {!gameState.isFinished && (
         <div className="w-full flex justify-center z-30 shrink-0">
-          <ArcadeNumpad activeGooierName={activeUser?.username} dartsThrownCount={gameState.dartsThrown.length} onThrow={handleThrow} onEndTurn={() => setGameState(prev => ({...prev!, currentTurnIndex: (prev!.currentTurnIndex + 1) % prev!.players.length, dartsThrown: []}))} onToggle={(e) => setIsPadExpanded(e)} color="#ff003c" />
+          <ArcadeNumpad
+            activeGooierName={activeUser?.username}
+            dartsThrownCount={gameState.dartsThrown.length}
+            lastDarts={gameState.dartsThrown}
+            canUndo={history.length > 0}
+            onUndo={handleUndo}
+            onThrow={handleThrow}
+            onEndTurn={handleEndTurn}
+            onToggle={(e) => setIsPadExpanded(e)}
+            color="#ff003c"
+          />
         </div>
       )}
 

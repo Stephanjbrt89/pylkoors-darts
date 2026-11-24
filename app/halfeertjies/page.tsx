@@ -26,6 +26,7 @@ export default function HalfeertjiesPage() {
   const [reactionUrl, setReactionUrl] = useState<string | null>(null);
   const [selectedSquad, setSelectedSquad] = useState<any[]>([]);
   const [isPadExpanded, setIsPadExpanded] = useState(false);
+  const [history, setHistory] = useState<HalfeertjiesState[]>([]);
   const router = useRouter();
 
   const handleStartGame = async (selectedPlayers: any[]) => {
@@ -48,8 +49,30 @@ export default function HalfeertjiesPage() {
     await ArcadeService.saveGameState(matchId, nextState);
   };
 
+  const handleUndo = () => {
+    if (history.length === 0 || !matchId) return;
+    const prevSnap = history[history.length - 1];
+    setHistory((prev) => prev.slice(0, -1));
+    setGameState(prevSnap);
+    setReactionUrl(null);
+    void ArcadeService.saveGameState(matchId, prevSnap);
+  };
+
+  const handleEndTurn = () => {
+    if (!gameState || !matchId || gameState.phase !== 'PLAY' || gameState.isFinished) return;
+    setHistory((prev) => [...prev.slice(-29), gameState]);
+    const nextState = {
+      ...gameState,
+      currentTurnIndex: (gameState.currentTurnIndex + 1) % gameState.players.length,
+      dartsThrown: [],
+    };
+    setGameState(nextState);
+    void ArcadeService.saveGameState(matchId, nextState);
+  };
+
   const handleHit = async (score: number, multiplier: number, label: string) => {
     if (!gameState || !matchId || gameState.phase !== 'PLAY') return;
+    setHistory((prev) => [...prev.slice(-29), gameState]);
     
     const currentPlayerIdx = gameState.currentTurnIndex;
     const oldScore = gameState.players[currentPlayerIdx].score;
@@ -85,14 +108,8 @@ export default function HalfeertjiesPage() {
       void handleHit(dart.score, dart.multiplier, dart.raw);
     },
     onTakeout: () => {
-      if (gameState && matchId && gameState.phase === 'PLAY' && gameState.dartsThrown.length > 0 && !gameState.isFinished) {
-        const nextState = {
-          ...gameState,
-          currentTurnIndex: (gameState.currentTurnIndex + 1) % gameState.players.length,
-          dartsThrown: [],
-        };
-        setGameState(nextState);
-        void ArcadeService.saveGameState(matchId, nextState);
+      if (gameState && gameState.dartsThrown.length > 0 && !gameState.isFinished) {
+        handleEndTurn();
       }
     },
   });
@@ -187,8 +204,11 @@ export default function HalfeertjiesPage() {
           <ArcadeNumpad 
             activeGooierName={currentPlayer.username}
             dartsThrownCount={gameState.dartsThrown.length}
+            lastDarts={gameState.dartsThrown}
+            canUndo={history.length > 0}
+            onUndo={handleUndo}
             onThrow={handleHit}
-            onEndTurn={() => setGameState(prev => ({...prev!, currentTurnIndex: (prev!.currentTurnIndex + 1) % prev!.players.length, dartsThrown: []}))}
+            onEndTurn={handleEndTurn}
             onToggle={(e) => setIsPadExpanded(e)}
             color="#facc15"
           />

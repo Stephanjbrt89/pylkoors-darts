@@ -34,6 +34,13 @@ export default function X01PlayTest() {
   const [isShaking, setIsShaking] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [playerStats, setPlayerStats] = useState<Record<string, { totalScored: number, dartCount: number }>>({});
+  const [history, setHistory] = useState<Array<{
+    currentTurnIndex: number;
+    scores: Record<string, number>;
+    dartsThrown: Dart[];
+    playerStats: Record<string, { totalScored: number; dartCount: number }>;
+    isWin: boolean;
+  }>>([]);
   
   // NEW: Track numpad expansion for board scaling
   const [isPadExpanded, setIsPadExpanded] = useState(false);
@@ -50,8 +57,44 @@ export default function X01PlayTest() {
     };
   }, []);
 
+  const pushHistory = () => {
+    setHistory((prev) => [
+      ...prev.slice(-29),
+      {
+        currentTurnIndex,
+        scores: { ...scores },
+        dartsThrown: [...dartsThrown],
+        playerStats: Object.fromEntries(
+          Object.entries(playerStats).map(([k, v]) => [k, { ...v }])
+        ),
+        isWin,
+      },
+    ]);
+  };
+
+  const handleUndo = () => {
+    if (history.length === 0) return;
+    if (turnTimerRef.current) {
+      clearTimeout(turnTimerRef.current);
+      turnTimerRef.current = null;
+    }
+    isTransitioningRef.current = false;
+    setIsTransitioning(false);
+
+    const prevSnapshot = history[history.length - 1];
+    setHistory((prev) => prev.slice(0, -1));
+    setCurrentTurnIndex(prevSnapshot.currentTurnIndex);
+    setScores(prevSnapshot.scores);
+    setDartsThrown(prevSnapshot.dartsThrown);
+    setPlayerStats(prevSnapshot.playerStats);
+    setIsWin(prevSnapshot.isWin);
+    setReactionUrl(null);
+    setRecordData(null);
+  };
+
   const endTurnManually = () => {
     if (!matchId || isTransitioningRef.current || isWin || activePlayers.length === 0) return;
+    pushHistory();
     const currentPlayer = activePlayers[currentTurnIndex];
     if (dartsThrown.length > 0 && currentPlayer) {
       void MatchService.saveVisit(matchId, currentPlayer.id, dartsThrown, false);
@@ -109,6 +152,8 @@ export default function X01PlayTest() {
     if (!matchId || isWin || isTransitioningRef.current) return;
     const currentPlayer = activePlayers[currentTurnIndex];
     if (!currentPlayer) return;
+
+    pushHistory();
 
     const currentScore = scores[currentPlayer.id];
     const dart: Dart = { score, multiplier, raw: label };
@@ -276,6 +321,9 @@ export default function X01PlayTest() {
           <ArcadeNumpad 
             activeGooierName={activeUser?.username || "Gooier"}
             dartsThrownCount={dartsThrown.length}
+            lastDarts={dartsThrown}
+            canUndo={history.length > 0}
+            onUndo={handleUndo}
             onThrow={handleThrow}
             onEndTurn={endTurnManually}
             onToggle={(expanded) => setIsPadExpanded(expanded)}
@@ -294,7 +342,12 @@ export default function X01PlayTest() {
                   <img src={activeUser?.avatar_url} className="w-56 h-56 rounded-full border-8 border-blue-500 shadow-2xl mb-8 object-cover bg-black" alt="" />
                   <p className="text-5xl font-black text-white uppercase italic tracking-tighter">{activeUser?.username} Dominates</p>
               </div>
-              <button onClick={() => window.location.reload()} className="bg-white text-black px-16 py-6 rounded-full font-black text-2xl hover:scale-110 transition shadow-lg uppercase italic tracking-tighter">Rematch</button>
+              <div className="flex items-center gap-4">
+                {history.length > 0 && (
+                  <button onClick={handleUndo} className="bg-amber-500/20 border-2 border-amber-400 text-amber-300 px-10 py-6 rounded-full font-black text-2xl hover:bg-amber-500/30 transition shadow-lg uppercase italic tracking-tighter">Undo Last Dart</button>
+                )}
+                <button onClick={() => window.location.reload()} className="bg-white text-black px-16 py-6 rounded-full font-black text-2xl hover:scale-110 transition shadow-lg uppercase italic tracking-tighter">Rematch</button>
+              </div>
           </div>
       )}
     </main>

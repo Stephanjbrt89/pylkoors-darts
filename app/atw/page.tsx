@@ -27,6 +27,7 @@ export default function AroundTheWorldPage() {
   const [reactionUrl, setReactionUrl] = useState<string | null>(null);
   const [dartCount, setDartCount] = useState(0);
   const [recordData, setRecordData] = useState<any>(null);
+  const [history, setHistory] = useState<Array<{ gameState: ATWState; dartCount: number }>>([]);
   const router = useRouter();
 
   const handleStartGame = async (selectedPlayers: any[]) => {
@@ -55,8 +56,20 @@ export default function AroundTheWorldPage() {
     await ArcadeService.saveGameState(matchId, nextState);
   };
 
+  const handleUndo = () => {
+    if (history.length === 0 || !matchId) return;
+    const prevSnap = history[history.length - 1];
+    setHistory((prev) => prev.slice(0, -1));
+    setGameState(prevSnap.gameState);
+    setDartCount(prevSnap.dartCount);
+    setReactionUrl(null);
+    setRecordData(null);
+    void ArcadeService.saveGameState(matchId, prevSnap.gameState);
+  };
+
   const handleHit = async (score: number, multiplier: number, label: string) => {
     if (!gameState || !matchId || gameState.isFinished) return;
+    setHistory((prev) => [...prev.slice(-29), { gameState, dartCount }]);
     const currentTotalDarts = dartCount + 1;
     setDartCount(currentTotalDarts);
     const currentPlayer = gameState.players[gameState.currentTurnIndex];
@@ -80,6 +93,7 @@ export default function AroundTheWorldPage() {
 
   const handleEndTurn = () => {
     if (!gameState || !matchId || gameState.isFinished) return;
+    setHistory((prev) => [...prev.slice(-29), { gameState, dartCount }]);
     const nextState = {
       ...gameState,
       currentTurnIndex: (gameState.currentTurnIndex + 1) % gameState.players.length,
@@ -164,7 +178,16 @@ export default function AroundTheWorldPage() {
 
       {!gameState.isFinished && (
         <div className="w-full flex justify-center z-30">
-          <ArcadeNumpad activeGooierName={currentPlayer.username} dartsThrownCount={gameState.dartsThrown.length} onThrow={handleHit} onEndTurn={() => { setGameState(prev => ({ ...prev!, currentTurnIndex: (prev!.currentTurnIndex + 1) % prev!.players.length, dartsThrown: [] })); }} color="#00f2ff" />
+          <ArcadeNumpad
+            activeGooierName={currentPlayer.username}
+            dartsThrownCount={gameState.dartsThrown.length}
+            lastDarts={gameState.dartsThrown}
+            canUndo={history.length > 0}
+            onUndo={handleUndo}
+            onThrow={handleHit}
+            onEndTurn={handleEndTurn}
+            color="#00f2ff"
+          />
         </div>
       )}
 

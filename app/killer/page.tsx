@@ -24,6 +24,7 @@ export default function KillerPage() {
   const [difficulty, setDifficulty] = useState<'EASY' | 'HARD'>('EASY');
   const [reactionUrl, setReactionUrl] = useState<string | null>(null);
   const [selectedSquad, setSelectedSquad] = useState<any[]>([]);
+  const [history, setHistory] = useState<KillerState[]>([]);
   const router = useRouter();
 
   const handleSquadConfirmed = (selectedPlayers: any[]) => {
@@ -51,8 +52,30 @@ export default function KillerPage() {
     await ArcadeService.saveGameState(matchId, nextState);
   };
 
+  const handleUndo = () => {
+    if (history.length === 0 || !matchId) return;
+    const prevSnap = history[history.length - 1];
+    setHistory((prev) => prev.slice(0, -1));
+    setGameState(prevSnap);
+    setReactionUrl(null);
+    void ArcadeService.saveGameState(matchId, prevSnap);
+  };
+
+  const handleEndTurn = () => {
+    if (!gameState || !matchId || gameState.phase !== 'PLAY' || gameState.pendingChoice || gameState.isFinished) return;
+    setHistory((prev) => [...prev.slice(-29), gameState]);
+    const nextState = {
+      ...gameState,
+      currentTurnIndex: (gameState.currentTurnIndex + 1) % gameState.players.length,
+      dartsThrown: [],
+    };
+    setGameState(nextState);
+    void ArcadeService.saveGameState(matchId, nextState);
+  };
+
   const onHit = async (score: number, multiplier: number, label: string) => {
     if (!gameState || !matchId || gameState.isFinished) return;
+    setHistory((prev) => [...prev.slice(-29), gameState]);
     const nextState = KillerEngine.handleThrow(gameState, { score, multiplier, raw: label });
     if (nextState.isFinished) {
       SoundService.play('win');
@@ -79,21 +102,8 @@ export default function KillerPage() {
       }
     },
     onTakeout: () => {
-      if (
-        gameState &&
-        matchId &&
-        gameState.phase === 'PLAY' &&
-        gameState.dartsThrown.length > 0 &&
-        !gameState.pendingChoice &&
-        !gameState.isFinished
-      ) {
-        const nextState = {
-          ...gameState,
-          currentTurnIndex: (gameState.currentTurnIndex + 1) % gameState.players.length,
-          dartsThrown: [],
-        };
-        setGameState(nextState);
-        void ArcadeService.saveGameState(matchId, nextState);
+      if (gameState && gameState.dartsThrown.length > 0 && !gameState.pendingChoice && !gameState.isFinished) {
+        handleEndTurn();
       }
     },
   });
@@ -192,7 +202,16 @@ export default function KillerPage() {
 
       {!gameState.isFinished && (
         <div className="w-full flex justify-center z-40 relative">
-          <ArcadeNumpad activeGooierName={currentPlayer.username} dartsThrownCount={gameState.dartsThrown.length} onThrow={onHit} onEndTurn={() => setGameState(prev => ({ ...prev!, currentTurnIndex: (prev!.currentTurnIndex + 1) % prev!.players.length, dartsThrown: [] }))} color="#facc15" />
+          <ArcadeNumpad
+            activeGooierName={currentPlayer.username}
+            dartsThrownCount={gameState.dartsThrown.length}
+            lastDarts={gameState.dartsThrown}
+            canUndo={history.length > 0}
+            onUndo={handleUndo}
+            onThrow={onHit}
+            onEndTurn={handleEndTurn}
+            color="#facc15"
+          />
         </div>
       )}
 

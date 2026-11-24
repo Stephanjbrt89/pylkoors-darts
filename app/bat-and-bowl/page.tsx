@@ -24,6 +24,7 @@ export default function BatAndBowlPage() {
   const [showSquadSelect, setShowSquadSelect] = useState(true);
   const [reactionUrl, setReactionUrl] = useState<string | null>(null);
   const [isPadExpanded, setIsPadExpanded] = useState(false);
+  const [history, setHistory] = useState<BatAndBowlState[]>([]);
   const router = useRouter();
 
   const handleStartGame = async (selectedPlayers: any[]) => {
@@ -55,8 +56,30 @@ export default function BatAndBowlPage() {
     await ArcadeService.saveGameState(matchId, nextState);
   };
 
+  const handleUndo = () => {
+    if (history.length === 0 || !matchId) return;
+    const prevSnap = history[history.length - 1];
+    setHistory((prev) => prev.slice(0, -1));
+    setGameState(prevSnap);
+    setReactionUrl(null);
+    void ArcadeService.saveGameState(matchId, prevSnap);
+  };
+
+  const handleEndTurn = () => {
+    if (!gameState || !matchId || gameState.phase !== 'PLAY') return;
+    setHistory((prev) => [...prev.slice(-29), gameState]);
+    const nextState = {
+      ...gameState,
+      currentTurnIndex: (gameState.currentTurnIndex + 1) % gameState.players.length,
+      dartsThrown: [],
+    };
+    setGameState(nextState);
+    void ArcadeService.saveGameState(matchId, nextState);
+  };
+
   const onThrow = async (score: number, multiplier: number, label: string) => {
     if (!gameState || !matchId || gameState.phase !== 'PLAY') return;
+    setHistory((prev) => [...prev.slice(-29), gameState]);
     const nextState = BatAndBowlEngine.handleThrow(gameState, { score, multiplier, raw: label });
     if (nextState.phase === 'FINISHED') {
         SoundService.play('win');
@@ -74,14 +97,8 @@ export default function BatAndBowlPage() {
       void onThrow(dart.score, dart.multiplier, dart.raw);
     },
     onTakeout: () => {
-      if (gameState && matchId && gameState.phase === 'PLAY' && gameState.dartsThrown.length > 0) {
-        const nextState = {
-          ...gameState,
-          currentTurnIndex: (gameState.currentTurnIndex + 1) % gameState.players.length,
-          dartsThrown: [],
-        };
-        setGameState(nextState);
-        void ArcadeService.saveGameState(matchId, nextState);
+      if (gameState && gameState.dartsThrown.length > 0) {
+        handleEndTurn();
       }
     },
   });
@@ -153,7 +170,17 @@ export default function BatAndBowlPage() {
 
       {!gameState.winnerId && (
         <div className="w-full flex justify-center z-30">
-          <ArcadeNumpad activeGooierName={currentPlayer?.username} dartsThrownCount={gameState.dartsThrown.length} onThrow={onThrow} onEndTurn={() => setGameState(prev => ({...prev!, currentTurnIndex: (prev!.currentTurnIndex + 1) % prev!.players.length, dartsThrown: []}))} onToggle={(e) => setIsPadExpanded(e)} color={currentPlayer?.role === 'batting' ? "#00FF66" : "#dc2626"} />
+          <ArcadeNumpad
+            activeGooierName={currentPlayer?.username}
+            dartsThrownCount={gameState.dartsThrown.length}
+            lastDarts={gameState.dartsThrown}
+            canUndo={history.length > 0}
+            onUndo={handleUndo}
+            onThrow={onThrow}
+            onEndTurn={handleEndTurn}
+            onToggle={(e) => setIsPadExpanded(e)}
+            color={currentPlayer?.role === 'batting' ? "#00FF66" : "#dc2626"}
+          />
         </div>
       )}
       <ReactionOverlay url={reactionUrl} onFinished={() => setReactionUrl(null)} />
