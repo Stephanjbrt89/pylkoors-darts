@@ -119,9 +119,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, event: resetEvent, realtime });
     }
 
-    // 4. Handle Standard Dart Throw Event (accepts segment, segmentName, or bed)
+    // 4. Handle Standard Dart Throw Event (accepts segment string, Autodarts segment object, segmentName, or bed)
+    const segmentFromBody =
+      typeof body.segment === 'object' && body.segment !== null
+        ? body.segment.name || body.segment.segmentName || body.segment.bed
+        : body.segment;
+
     const rawSegment =
-      body.segment ||
+      segmentFromBody ||
       body.segmentName ||
       body.bed ||
       (body.score !== undefined

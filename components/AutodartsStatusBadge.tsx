@@ -20,35 +20,79 @@ export function AutodartsStatusBadge() {
   } = useAutodarts();
   const [isOpen, setIsOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [lastBenchResult, setLastBenchResult] = useState<string | null>(null);
 
-  const endpointUrl = typeof window !== 'undefined' ? `${window.location.origin}/api/autodarts/throw` : '/api/autodarts/throw';
+  const endpointUrl =
+    typeof window !== 'undefined'
+      ? `${window.location.origin}/api/autodarts/throw`
+      : 'https://pylkoors-darts.vercel.app/api/autodarts/throw';
 
-  const samplePython = `# autodarts_pylkoors_bridge.py
-import requests
-import json
-import time
+  const samplePython = `# ~/bridge.py — Pylkoors Autodarts v2 WebSocket Bridge
+import json, os, time, requests, websocket
 
-PYLKOORS_URL = "${endpointUrl}"
-BOARD_ID = "${activeBoardId}"
+PYLKOORS_URL = os.getenv("PYLKOORS_URL", "${endpointUrl}")
+BOARD_ID = os.getenv("AUTODARTS_BOARD_ID", "${activeBoardId}")
+WEBHOOK_SECRET = os.getenv("AUTODARTS_WEBHOOK_SECRET", "")
+AUTODARTS_WS = os.getenv("AUTODARTS_WS", "ws://127.0.0.1:3180/api/events")
 
-def send_dart(segment, dart_index=1):
-    payload = {
-        "boardId": BOARD_ID,
-        "segment": segment,
-        "dartIndex": dart_index,
-        "timestamp": int(time.time() * 1000)
-    }
+sent_throw_count = 0
+in_takeout = False
+
+def post_event(payload):
+    payload["boardId"] = BOARD_ID
+    headers = {"Content-Type": "application/json"}
+    if WEBHOOK_SECRET:
+        headers["x-autodarts-secret"] = WEBHOOK_SECRET
     try:
-        r = requests.post(PYLKOORS_URL, json=payload, timeout=2)
-        print(f"Sent {segment}: {r.status_code}")
+        r = requests.post(PYLKOORS_URL, json=payload, headers=headers, timeout=3)
+        print(f"[BRIDGE] POST {payload.get('segment') or payload.get('type')} -> {r.status_code} {r.text}", flush=True)
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"[BRIDGE] POST error: {e}", flush=True)
 
-# Example: simulate 3 darts & takeout
-send_dart("T20", 1)
-send_dart("T20", 2)
-send_dart("T20", 3)
-requests.post(PYLKOORS_URL, json={"type": "TAKEOUT", "boardId": BOARD_ID})
+def on_message(ws, raw):
+    global sent_throw_count, in_takeout
+    try:
+        msg = json.loads(raw)
+    except Exception:
+        return
+    if msg.get("type") != "state":
+        return
+    data = msg.get("data") or {}
+    status = str(data.get("status", ""))
+    event = str(data.get("event", ""))
+    throws = data.get("throws") or []
+
+    if status == "Takeout" or "Takeout" in event:
+        if not in_takeout and sent_throw_count > 0:
+            in_takeout = True
+            post_event({"type": "TAKEOUT"})
+        if len(throws) == 0:
+            sent_throw_count = 0
+        return
+
+    in_takeout = False
+    if len(throws) < sent_throw_count:
+        sent_throw_count = len(throws)
+
+    while sent_throw_count < len(throws):
+        t = throws[sent_throw_count]
+        seg = t.get("segment")
+        seg_name = seg.get("name") if isinstance(seg, dict) else (t.get("segmentName") or seg or "MISS")
+        sent_throw_count += 1
+        post_event({
+            "segment": str(seg_name),
+            "dartIndex": min(sent_throw_count, 3),
+            "coords": t.get("coords"),
+        })
+
+while True:
+    try:
+        print(f"[BRIDGE] Connecting to {AUTODARTS_WS} -> {PYLKOORS_URL}", flush=True)
+        ws = websocket.WebSocketApp(AUTODARTS_WS, on_message=on_message)
+        ws.run_forever(ping_interval=15, ping_timeout=5)
+    except Exception as e:
+        print(f"[BRIDGE] WS error: {e}", flush=True)
+    time.sleep(2)
 `;
 
   const copyScript = () => {
@@ -56,6 +100,28 @@ requests.post(PYLKOORS_URL, json={"type": "TAKEOUT", "boardId": BOARD_ID})
       navigator.clipboard.writeText(samplePython);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  const handleTestThrow = async (seg: string) => {
+    const res = await simulateThrow(seg, 1);
+    if (res?.realtime) {
+      setLastBenchResult(
+        res.realtime.ok
+          ? `Server broadcast OK (${res.realtime.status ?? 202})`
+          : `Server broadcast FAILED: ${res.realtime.error || res.realtime.status || 'unknown'}`
+      );
+    }
+  };
+
+  const handleTestTakeout = async () => {
+    const res = await simulateTakeout();
+    if (res?.realtime) {
+      setLastBenchResult(
+        res.realtime.ok
+          ? `Takeout broadcast OK (${res.realtime.status ?? 202})`
+          : `Takeout broadcast FAILED: ${res.realtime.error || res.realtime.status || 'unknown'}`
+      );
     }
   };
 
@@ -171,26 +237,31 @@ requests.post(PYLKOORS_URL, json={"type": "TAKEOUT", "boardId": BOARD_ID})
                   {['T20', 'T19', 'D16', 'BULL', '25', 'S20', 'MISS'].map((seg) => (
                     <button
                       key={seg}
-                      onClick={() => simulateThrow(seg, 1)}
+                      onClick={() => handleTestThrow(seg)}
                       className="px-3 py-1.5 rounded-lg bg-slate-900 border border-white/10 hover:border-cyan-400 hover:text-cyan-300 text-xs font-mono font-bold text-slate-300 transition-all active:scale-95"
                     >
                       {seg}
                     </button>
                   ))}
                   <button
-                    onClick={() => simulateTakeout()}
+                    onClick={handleTestTakeout}
                     className="px-3 py-1.5 rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-300 hover:bg-amber-500/30 text-xs font-bold transition-all active:scale-95 ml-auto"
                   >
                     ↺ Next Turn / Takeout
                   </button>
                 </div>
+                {lastBenchResult && (
+                  <p className="mt-2 text-[10px] font-mono text-cyan-300">
+                    {lastBenchResult}
+                  </p>
+                )}
               </div>
 
               {/* Raspberry Pi Script Accordion */}
               <div>
                 <div className="flex items-center justify-between mb-1.5">
                   <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">
-                    Raspberry Pi Python Listener Script
+                    Raspberry Pi Python Listener Script (~/bridge.py)
                   </span>
                   <button
                     onClick={copyScript}
