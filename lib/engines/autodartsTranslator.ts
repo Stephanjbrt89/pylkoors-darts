@@ -13,12 +13,12 @@ export const DARTBOARD_NUMBERS = [
 /**
  * Normalizes Autodarts segment identifiers into a clean internal representation.
  * Handles variations like:
- * - "T20", "t20" -> Triple 20
- * - "D16", "d16" -> Double 16
- * - "S5", "5" -> Single 5
- * - "BULL", "DBULL", "50" -> Double Bull (50 pts, mult 2)
- * - "25", "SBULL" -> Single Bull (25 pts, mult 1)
- * - "MISS", "OUT", "0" -> Miss (0 pts, mult 0)
+ * - "T20", "t20" -> Triple 20 (score 20, mult 3 = 60 pts)
+ * - "D16", "d16" -> Double 16 (score 16, mult 2 = 32 pts)
+ * - "S5", "5" -> Single 5 (score 5, mult 1 = 5 pts)
+ * - "BULL", "DBULL", "D25", "50" -> Double Bull (score 25, mult 2 = 50 pts)
+ * - "25", "SBULL", "S25", "OBULL" -> Single Bull (score 25, mult 1 = 25 pts)
+ * - "MISS", "OUT", "0", "M20" -> Miss (score 0, mult 0 = 0 pts)
  */
 export function parseAutodartsSegment(segment: string): { score: number; multiplier: number; raw: string } {
   if (!segment || typeof segment !== 'string') {
@@ -27,16 +27,32 @@ export function parseAutodartsSegment(segment: string): { score: number; multipl
 
   const clean = segment.trim().toUpperCase();
 
-  // Miss / Out of bounds
-  if (clean === 'MISS' || clean === 'OUT' || clean === '0') {
+  // Miss / Out of bounds (including Autodarts v2 catch-ring misses like "M20", "M1", "M25")
+  if (clean === 'MISS' || clean === 'OUT' || clean === '0' || clean === 'M' || /^M\d+$/.test(clean)) {
     return { score: 0, multiplier: 0, raw: 'MISS' };
   }
 
-  // Bullseye cases
-  if (clean === 'BULL' || clean === 'DBULL' || clean === '50') {
-    return { score: 50, multiplier: 2, raw: 'BULL' };
+  // Bullseye cases (Double Bull = score 25 * multiplier 2 = 50 pts)
+  if (
+    clean === 'BULL' ||
+    clean === 'DBULL' ||
+    clean === 'D-BULL' ||
+    clean === 'D25' ||
+    clean === '50' ||
+    clean === 'BULLSEYE'
+  ) {
+    return { score: 25, multiplier: 2, raw: 'BULL' };
   }
-  if (clean === '25' || clean === 'SBULL' || clean === 'OBULL') {
+
+  // Outer Bull (Single Bull = score 25 * multiplier 1 = 25 pts)
+  if (
+    clean === '25' ||
+    clean === 'SBULL' ||
+    clean === 'S-BULL' ||
+    clean === 'OBULL' ||
+    clean === 'S25' ||
+    clean === 'OUTER BULL'
+  ) {
     return { score: 25, multiplier: 1, raw: '25' };
   }
 
@@ -81,21 +97,21 @@ export function autodartsPayloadToDart(payload: Partial<AutodartsThrowPayload>):
   }
 
   // Fallback if raw score and multiplier are provided directly
-  const score = Number(payload.score) || 0;
-  const multiplier = (Number(payload.multiplier) || (score > 0 ? 1 : 0)) as 0 | 1 | 2 | 3;
-  let raw = 'MISS';
-  if (multiplier === 0 || score === 0) {
-    raw = 'MISS';
-  } else if (score === 50) {
-    raw = 'BULL';
-  } else if (score === 25) {
-    raw = '25';
-  } else {
-    const prefix = multiplier === 3 ? 'T' : multiplier === 2 ? 'D' : 'S';
-    raw = `${prefix}${score}`;
+  const rawScore = Number(payload.score) || 0;
+  const rawMultiplier = (Number(payload.multiplier) || (rawScore > 0 ? 1 : 0)) as 0 | 1 | 2 | 3;
+
+  if (rawMultiplier === 0 || rawScore === 0) {
+    return { score: 0, multiplier: 0, raw: 'MISS' };
+  }
+  if (rawScore === 50 || (rawScore === 25 && rawMultiplier === 2)) {
+    return { score: 25, multiplier: 2, raw: 'BULL' };
+  }
+  if (rawScore === 25) {
+    return { score: 25, multiplier: 1, raw: '25' };
   }
 
-  return { score, multiplier, raw };
+  const prefix = rawMultiplier === 3 ? 'T' : rawMultiplier === 2 ? 'D' : 'S';
+  return { score: rawScore, multiplier: rawMultiplier, raw: `${prefix}${rawScore}` };
 }
 
 /**

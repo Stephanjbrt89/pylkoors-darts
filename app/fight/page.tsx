@@ -11,6 +11,8 @@ import { ReactionOverlay } from '@/components/ReactionOverlay';
 import { GooierFighter } from '@/components/GooierFighter';
 import { GameInfo } from '@/components/GameInfo';
 import { ArcadeNumpad } from '@/components/ArcadeNumpad';
+import { AutodartsStatusBadge } from '@/components/AutodartsStatusBadge';
+import { useAutodarts } from '@/lib/hooks/useAutodarts';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
@@ -68,6 +70,27 @@ export default function FightGamePage() {
     await ArcadeService.saveGameState(matchId, nextState);
   };
 
+  useAutodarts({
+    enabled: !!matchId && gameState?.phase === 'PLAY' && !gameState?.isFinished,
+    matchId: matchId || undefined,
+    onThrow: (dart) => {
+      void handleThrow(dart.score, dart.multiplier, dart.raw);
+    },
+    onTakeout: () => {
+      if (gameState && matchId && gameState.phase === 'PLAY' && gameState.dartsThrown.length > 0 && !gameState.isFinished) {
+        let nextIdx = (gameState.currentTurnIndex + 1) % gameState.players.length;
+        let guard = 0;
+        while (gameState.players[nextIdx]?.isEliminated && guard < gameState.players.length) {
+          nextIdx = (nextIdx + 1) % gameState.players.length;
+          guard++;
+        }
+        const nextState = { ...gameState, currentTurnIndex: nextIdx, dartsThrown: [] };
+        setGameState(nextState);
+        void ArcadeService.saveGameState(matchId, nextState);
+      }
+    },
+  });
+
   if (showSquadSelect) return <SquadSelect gameName="Fight Game" minPlayers={1} maxPlayers={6} onStart={handleStartGame} onCancel={() => router.push('/')} />;
   if (!gameState) return null;
 
@@ -80,7 +103,10 @@ export default function FightGamePage() {
       <div className="w-full flex justify-between items-center px-10 py-2 bg-black/40 border-b border-white/5 z-20 shrink-0">
         <Link href="/" className="bg-slate-900 border border-slate-700 px-6 py-2 rounded-full text-[10px] font-black hover:bg-red-600 transition text-white">LOBBY</Link>
         <h1 className="text-xl font-black italic tracking-[0.3em] opacity-40 uppercase">Battle Arena</h1>
-        <GameInfo title="Fight Game" color="#ff003c" rules={["Defend sectors.", "Hit opponents.", "Hit your own to heal.", "Multipliers count!"]} />
+        <div className="flex items-center gap-3">
+          <AutodartsStatusBadge />
+          <GameInfo title="Fight Game" color="#ff003c" rules={["Defend sectors.", "Hit opponents.", "Hit your own to heal.", "Multipliers count!"]} />
+        </div>
       </div>
 
       <div className="relative z-10 flex items-end justify-center px-10 pb-4 overflow-visible h-full flex-grow">

@@ -5,9 +5,8 @@ import { useState } from 'react';
 import { useAutodarts } from '@/lib/hooks/useAutodarts';
 
 export function AutodartsStatusBadge() {
-  const { isConnected, lastThrow, lastEventTime, simulateThrow, simulateTakeout } = useAutodarts();
+  const { isConnected, lastThrow, lastEventTime, activeBoardId, simulateThrow, simulateTakeout } = useAutodarts();
   const [isOpen, setIsOpen] = useState(false);
-  const [testSegment, setTestSegment] = useState('T20');
   const [copied, setCopied] = useState(false);
 
   const endpointUrl = typeof window !== 'undefined' ? `${window.location.origin}/api/autodarts/throw` : '/api/autodarts/throw';
@@ -18,9 +17,11 @@ import json
 import time
 
 PYLKOORS_URL = "${endpointUrl}"
+BOARD_ID = "${activeBoardId}"
 
 def send_dart(segment, dart_index=1):
     payload = {
+        "boardId": BOARD_ID,
         "segment": segment,
         "dartIndex": dart_index,
         "timestamp": int(time.time() * 1000)
@@ -35,7 +36,7 @@ def send_dart(segment, dart_index=1):
 send_dart("T20", 1)
 send_dart("T20", 2)
 send_dart("T20", 3)
-requests.post(PYLKOORS_URL, json={"type": "TAKEOUT"})
+requests.post(PYLKOORS_URL, json={"type": "TAKEOUT", "boardId": BOARD_ID})
 `;
 
   const copyScript = () => {
@@ -51,7 +52,7 @@ requests.post(PYLKOORS_URL, json={"type": "TAKEOUT"})
       <button
         onClick={() => setIsOpen(true)}
         className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-900/80 border border-white/10 hover:border-cyan-500/40 text-xs transition-all shadow-md group"
-        title="Autodarts Raspberry Pi Bridge Status"
+        title={`Autodarts Board: ${activeBoardId}`}
       >
         <span className="relative flex h-2 w-2">
           {isConnected && (
@@ -85,7 +86,7 @@ requests.post(PYLKOORS_URL, json={"type": "TAKEOUT"})
                     Raspberry Pi Autodarts Bridge
                   </h3>
                   <p className="text-xs text-slate-400">
-                    Direct Webhook / HTTP Event Pipeline (<span className="text-cyan-400">&lt;50ms latency</span>)
+                    Direct Webhook / Realtime Pipeline (<span className="text-cyan-400">&lt;50ms latency</span>)
                   </p>
                 </div>
               </div>
@@ -109,6 +110,9 @@ requests.post(PYLKOORS_URL, json={"type": "TAKEOUT"})
                   <div>
                     <p className="text-xs font-bold text-white uppercase">
                       {isConnected ? 'Client Connected & Listening' : 'Waiting for Raspberry Pi Events'}
+                    </p>
+                    <p className="text-[10px] text-slate-500 font-mono">
+                      Board ID: {activeBoardId}
                     </p>
                     <p className="text-[10px] text-slate-500">
                       {lastEventTime

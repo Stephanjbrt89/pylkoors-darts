@@ -121,21 +121,37 @@ export const VisualDartboard = ({ lastDarts, highlight }: Props) => {
           strokeWidth="1"
         />
 
-        {/* 8. HIT MARKERS (Green Glowing Dots) */}
+        {/* 8. HIT MARKERS (Green Glowing Dots, Red Outer Ring for Misses) */}
         {lastDarts.map((d, i) => {
-          // Find the angle of the segment based on the numerical value
-          const segmentIdx = BOARD_ORDER.indexOf(d.score === 25 || d.score === 50 ? 20 : d.score);
-          const angle = segmentIdx * 18;
-          
+          const isMiss = d.score === 0 || d.multiplier <= 0;
+          if (isMiss) {
+            const missCoord = getCoordinates(30 + i * 25, 224);
+            return (
+              <g key={i} className="animate-in zoom-in duration-300">
+                <circle cx={missCoord.x} cy={missCoord.y} r="7" fill="#ef4444" fillOpacity="0.6" />
+                <circle cx={missCoord.x} cy={missCoord.y} r="2.5" fill="white" />
+              </g>
+            );
+          }
+
+          const isBull = d.score === 25 || d.score === 50;
+          const segmentIdx = BOARD_ORDER.indexOf(isBull ? 20 : d.score);
+          const angle = segmentIdx >= 0 ? segmentIdx * 18 : 0;
+
           // Determine the radius based on Multiplier
           let rad = 150; // Default single
-          if (d.multiplier === 2) rad = 192;
-          if (d.multiplier === 3) rad = 112;
-          if (d.score === 25) rad = 13; // Outer Bull
-          if (d.score === 50) rad = 0;  // Dead center
+          if (d.score === 50 || (d.score === 25 && d.multiplier === 2)) {
+            rad = 0; // Inner Double Bull (Dead center)
+          } else if (d.score === 25) {
+            rad = 13; // Outer Bull
+          } else if (d.multiplier === 2) {
+            rad = 192;
+          } else if (d.multiplier === 3) {
+            rad = 112;
+          }
 
           const coord = getCoordinates(angle, rad);
-          
+
           return (
             <g key={i} className="animate-in zoom-in duration-300">
               {/* Hit Glow */}

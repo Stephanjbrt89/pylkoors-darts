@@ -1,5 +1,5 @@
 // lib/services/autodartsBus.ts
-import { AutodartsEvent, AutodartsBridgeState } from '@/types/autodarts';
+import { AutodartsEvent, AutodartsBridgeState, DEFAULT_AUTODARTS_BOARD_ID } from '@/types/autodarts';
 
 type EventListener = (event: AutodartsEvent) => void;
 
@@ -7,7 +7,7 @@ class AutodartsEventBus {
   private listeners: Set<EventListener> = new Set();
   private lastEvent: AutodartsEvent | null = null;
   private lastHeartbeat: number = 0;
-  private boardId: string = 'pi-board-1';
+  private boardId: string = DEFAULT_AUTODARTS_BOARD_ID;
 
   public subscribe(listener: EventListener): () => void {
     this.listeners.add(listener);

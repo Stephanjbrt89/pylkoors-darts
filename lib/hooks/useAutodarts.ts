@@ -3,11 +3,17 @@
 
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { Dart } from '@/types/schema';
-import { AutodartsEvent, AutodartsThrowPayload } from '@/types/autodarts';
+import {
+  AutodartsEvent,
+  AutodartsThrowPayload,
+  DEFAULT_AUTODARTS_BOARD_ID,
+} from '@/types/autodarts';
 import { autodartsPayloadToDart } from '@/lib/engines/autodartsTranslator';
+import { supabase } from '@/lib/supabase';
 
 interface UseAutodartsOptions {
   enabled?: boolean;
+  boardId?: string;
   matchId?: string;
   onThrow?: (dart: Dart, payload: AutodartsThrowPayload) => void;
   onTakeout?: () => void;
@@ -15,18 +21,29 @@ interface UseAutodartsOptions {
 }
 
 export function useAutodarts(options: UseAutodartsOptions = {}) {
-  const { enabled = true, matchId, onThrow, onTakeout, onReset } = options;
+  const {
+    enabled = true,
+    boardId = DEFAULT_AUTODARTS_BOARD_ID,
+    matchId,
+    onThrow,
+    onTakeout,
+    onReset,
+  } = options;
 
-  const [isConnected, setIsConnected] = useState<boolean>(false);
+  const [sseConnected, setSseConnected] = useState<boolean>(false);
+  const [realtimeConnected, setRealtimeConnected] = useState<boolean>(false);
   const [lastThrow, setLastThrow] = useState<Dart | null>(null);
   const [lastEventTime, setLastEventTime] = useState<number | null>(null);
-  const [activeBoardId, setActiveBoardId] = useState<string | null>(null);
+  const [activeBoardId, setActiveBoardId] = useState<string>(boardId);
 
-  // Store latest callbacks in refs to prevent reconnecting SSE on handler updates
+  const isConnected = sseConnected || realtimeConnected;
+
+  // Store latest callbacks in refs to prevent reconnecting transports on handler updates
   const onThrowRef = useRef(onThrow);
   const onTakeoutRef = useRef(onTakeout);
   const onResetRef = useRef(onReset);
   const matchIdRef = useRef(matchId);
+  const seenEventsRef = useRef<string[]>([]);
 
   useEffect(() => {
     onThrowRef.current = onThrow;
@@ -35,80 +52,119 @@ export function useAutodarts(options: UseAutodartsOptions = {}) {
     matchIdRef.current = matchId;
   });
 
+  const handleIncomingEvent = useCallback((data: AutodartsEvent | { type: 'CONNECTED' }) => {
+    if (data.type === 'CONNECTED') {
+      setSseConnected(true);
+      return;
+    }
+
+    // Deduplicate across SSE and Supabase Realtime dual-transport
+    if ('eventId' in data && data.eventId) {
+      if (seenEventsRef.current.includes(data.eventId)) {
+        return;
+      }
+      seenEventsRef.current = [...seenEventsRef.current.slice(-49), data.eventId];
+    }
+
+    // Filter by matchId if specific match was passed in options and in payload
+    if (
+      matchIdRef.current &&
+      'matchId' in data &&
+      data.matchId &&
+      data.matchId !== matchIdRef.current
+    ) {
+      return;
+    }
+
+    setLastEventTime(Date.now());
+    if ('boardId' in data && data.boardId) {
+      setActiveBoardId(data.boardId);
+    }
+
+    if (data.type === 'THROW') {
+      const dart = autodartsPayloadToDart(data);
+      setLastThrow(dart);
+      onThrowRef.current?.(dart, data);
+    } else if (data.type === 'TAKEOUT') {
+      onTakeoutRef.current?.();
+    } else if (data.type === 'RESET' || data.type === 'UNDO') {
+      onResetRef.current?.();
+    }
+  }, []);
+
   useEffect(() => {
     if (!enabled || typeof window === 'undefined') return;
 
     let eventSource: EventSource | null = null;
-    let reconnectTimeout: NodeJS.Timeout;
+    let reconnectTimeout: ReturnType<typeof setTimeout>;
+    let isDisposed = false;
 
-    function connect() {
+    function connectSSE() {
+      if (isDisposed) return;
       try {
         eventSource = new EventSource('/api/autodarts/events');
 
         eventSource.onopen = () => {
-          setIsConnected(true);
+          if (!isDisposed) setSseConnected(true);
         };
 
         eventSource.onmessage = (event) => {
-          if (!event.data) return;
+          if (!event.data || isDisposed) return;
           try {
             const data: AutodartsEvent | { type: 'CONNECTED' } = JSON.parse(event.data);
-
-            if (data.type === 'CONNECTED') {
-              setIsConnected(true);
-              return;
-            }
-
-            // Filter by matchId if specific match was passed in options and in payload
-            if (
-              matchIdRef.current &&
-              'matchId' in data &&
-              data.matchId &&
-              data.matchId !== matchIdRef.current
-            ) {
-              return;
-            }
-
-            setLastEventTime(Date.now());
-            if ('boardId' in data && data.boardId) {
-              setActiveBoardId(data.boardId);
-            }
-
-            if (data.type === 'THROW') {
-              const dart = autodartsPayloadToDart(data);
-              setLastThrow(dart);
-              onThrowRef.current?.(dart, data);
-            } else if (data.type === 'TAKEOUT') {
-              onTakeoutRef.current?.();
-            } else if (data.type === 'RESET' || data.type === 'UNDO') {
-              onResetRef.current?.();
-            }
+            handleIncomingEvent(data);
           } catch (err) {
-            console.error('Failed to parse incoming Autodarts event:', err);
+            console.error('Failed to parse incoming Autodarts SSE event:', err);
           }
         };
 
         eventSource.onerror = () => {
-          setIsConnected(false);
+          if (isDisposed) return;
+          setSseConnected(false);
           eventSource?.close();
-          // Attempt reconnection after 3 seconds
-          reconnectTimeout = setTimeout(connect, 3000);
+          reconnectTimeout = setTimeout(connectSSE, 3000);
         };
       } catch (err) {
         console.error('EventSource initialization error:', err);
-        setIsConnected(false);
-        reconnectTimeout = setTimeout(connect, 3000);
+        setSseConnected(false);
+        reconnectTimeout = setTimeout(connectSSE, 3000);
       }
     }
 
-    connect();
+    connectSSE();
+
+    // Also subscribe to Supabase Realtime Broadcast for Vercel serverless multi-instance delivery
+    let realtimeChannel: ReturnType<typeof supabase.channel> | null = null;
+    const hasSupabase =
+      Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL) &&
+      Boolean(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
+
+    if (hasSupabase) {
+      realtimeChannel = supabase
+        .channel(`autodarts-board:${boardId}`)
+        .on('broadcast', { event: 'autodarts' }, ({ payload }) => {
+          if (!isDisposed && payload) {
+            handleIncomingEvent(payload as AutodartsEvent);
+          }
+        })
+        .subscribe((status) => {
+          if (!isDisposed) {
+            setRealtimeConnected(status === 'SUBSCRIBED');
+          }
+        });
+    }
 
     return () => {
+      isDisposed = true;
       clearTimeout(reconnectTimeout);
       eventSource?.close();
-      setIsConnected(false);
+      setSseConnected(false);
+      setRealtimeConnected(false);
+      if (realtimeChannel) {
+        supabase.removeChannel(realtimeChannel).catch(() => {});
+      }
     };
-  }, [enabled]);
+  }, [enabled, boardId, handleIncomingEvent]);
 
   // Client-side testing helper to fire simulated throws into the pipeline
   const simulateThrow = useCallback(
@@ -118,6 +174,7 @@ export function useAutodarts(options: UseAutodartsOptions = {}) {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
+            boardId,
             segment,
             dartIndex,
             matchId: matchIdRef.current,
@@ -128,7 +185,7 @@ export function useAutodarts(options: UseAutodartsOptions = {}) {
         console.error('Simulate throw failed:', err);
       }
     },
-    []
+    [boardId]
   );
 
   const simulateTakeout = useCallback(async () => {
@@ -138,6 +195,7 @@ export function useAutodarts(options: UseAutodartsOptions = {}) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           type: 'TAKEOUT',
+          boardId,
           matchId: matchIdRef.current,
         }),
       });
@@ -145,7 +203,7 @@ export function useAutodarts(options: UseAutodartsOptions = {}) {
     } catch (err) {
       console.error('Simulate takeout failed:', err);
     }
-  }, []);
+  }, [boardId]);
 
   return {
     isConnected,

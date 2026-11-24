@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { X01Engine } from '@/lib/engines/x01';
 import { MatchService } from '@/lib/services/matchService';
 import { StatsService } from '@/lib/services/statsService';
@@ -38,21 +38,40 @@ export default function X01PlayTest() {
   // NEW: Track numpad expansion for board scaling
   const [isPadExpanded, setIsPadExpanded] = useState(false);
 
+  // Synchronous ref guards to prevent rapid-throw/takeout race conditions
+  const isTransitioningRef = useRef(false);
+  const turnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const router = useRouter();
+
+  useEffect(() => {
+    return () => {
+      if (turnTimerRef.current) clearTimeout(turnTimerRef.current);
+    };
+  }, []);
+
+  const endTurnManually = () => {
+    if (!matchId || isTransitioningRef.current || isWin || activePlayers.length === 0) return;
+    const currentPlayer = activePlayers[currentTurnIndex];
+    if (dartsThrown.length > 0 && currentPlayer) {
+      void MatchService.saveVisit(matchId, currentPlayer.id, dartsThrown, false);
+    }
+    setDartsThrown([]);
+    setCurrentTurnIndex((prev) => (prev + 1) % activePlayers.length);
+  };
 
   // Autodarts Real-Time Hardware Bridge
   useAutodarts({
     enabled: !!matchId && !isWin,
     matchId: matchId || undefined,
     onThrow: (dart) => {
-      if (!isTransitioning && !isWin) {
+      if (!isTransitioningRef.current && !isWin) {
         handleThrow(dart.score, dart.multiplier, dart.raw);
       }
     },
     onTakeout: () => {
-      if (!isTransitioning && !isWin && dartsThrown.length > 0) {
-        setDartsThrown([]);
-        setCurrentTurnIndex((prev) => (prev + 1) % activePlayers.length);
+      if (!isTransitioningRef.current && !isWin && dartsThrown.length > 0) {
+        endTurnManually();
       }
     },
   });
@@ -87,26 +106,31 @@ export default function X01PlayTest() {
   };
 
   const handleThrow = async (score: number, multiplier: number, label: string) => {
-    if (!matchId || isWin || isTransitioning) return;
+    if (!matchId || isWin || isTransitioningRef.current) return;
     const currentPlayer = activePlayers[currentTurnIndex];
+    if (!currentPlayer) return;
+
     const currentScore = scores[currentPlayer.id];
     const dart: Dart = { score, multiplier, raw: label };
     const willWin = X01Engine.checkWin(currentScore, dart, true);
     const willBust = X01Engine.checkBust(currentScore, dart, true);
     const newDarts = [...dartsThrown, dart];
-
-    setPlayerStats(prev => ({
-      ...prev,
-      [currentPlayer.id]: {
-        totalScored: prev[currentPlayer.id].totalScored + (willBust ? 0 : (score * multiplier)),
-        dartCount: prev[currentPlayer.id].dartCount + 1
-      }
-    }));
+    const priorVisitPoints = dartsThrown.reduce((s, d) => s + (d.score * d.multiplier), 0);
 
     if (willWin) {
+      isTransitioningRef.current = true;
       setIsWin(true);
+      setDartsThrown(newDarts);
       setScores(prev => ({ ...prev, [currentPlayer.id]: 0 }));
+      setPlayerStats(prev => ({
+        ...prev,
+        [currentPlayer.id]: {
+          totalScored: prev[currentPlayer.id].totalScored + (score * multiplier),
+          dartCount: prev[currentPlayer.id].dartCount + 1
+        }
+      }));
       const totalDarts = (playerStats[currentPlayer.id]?.dartCount || 0) + 1;
+      void MatchService.saveVisit(matchId, currentPlayer.id, newDarts, false);
       const wasRecord = await StatsService.updateRecord(`X01_${targetScore}`, 'FEWEST_DARTS', currentPlayer.id, totalDarts, matchId);
       if (wasRecord) {
         SoundService.play('record');
@@ -118,26 +142,50 @@ export default function X01PlayTest() {
       }
       await MatchService.finishMatch(matchId, currentPlayer.id);
     } else if (willBust) {
+      isTransitioningRef.current = true;
       setIsTransitioning(true);
+      setDartsThrown(newDarts);
+      // Revert any points scored earlier in this busted visit
+      setScores(prev => ({ ...prev, [currentPlayer.id]: currentScore + priorVisitPoints }));
+      setPlayerStats(prev => ({
+        ...prev,
+        [currentPlayer.id]: {
+          totalScored: Math.max(0, prev[currentPlayer.id].totalScored - priorVisitPoints),
+          dartCount: prev[currentPlayer.id].dartCount + 1
+        }
+      }));
       SoundService.play('bust');
       setReactionUrl(GifService.getRandomGifUrl('BUST'));
-      await MatchService.saveVisit(matchId, currentPlayer.id, newDarts, true);
-      setTimeout(() => {
+      void MatchService.saveVisit(matchId, currentPlayer.id, newDarts, true);
+      turnTimerRef.current = setTimeout(() => {
         setDartsThrown([]);
-        setCurrentTurnIndex((currentTurnIndex + 1) % activePlayers.length);
+        setCurrentTurnIndex((prev) => (prev + 1) % activePlayers.length);
+        isTransitioningRef.current = false;
         setIsTransitioning(false);
       }, 2000);
     } else {
+      setPlayerStats(prev => ({
+        ...prev,
+        [currentPlayer.id]: {
+          totalScored: prev[currentPlayer.id].totalScored + (score * multiplier),
+          dartCount: prev[currentPlayer.id].dartCount + 1
+        }
+      }));
       setScores(prev => ({ ...prev, [currentPlayer.id]: prev[currentPlayer.id] - (score * multiplier) }));
       setDartsThrown(newDarts);
       if (newDarts.length === 3) {
+        isTransitioningRef.current = true;
         setIsTransitioning(true);
-        if (newDarts.reduce((s, d) => s + (d.score * d.multiplier), 0) === 180) { SoundService.play('180'); triggerHype('BOOM'); }
-        await MatchService.saveVisit(matchId, currentPlayer.id, newDarts, false);
-        setTimeout(() => {
-            setDartsThrown([]);
-            setCurrentTurnIndex((currentTurnIndex + 1) % activePlayers.length);
-            setIsTransitioning(false);
+        if (newDarts.reduce((s, d) => s + (d.score * d.multiplier), 0) === 180) {
+          SoundService.play('180');
+          triggerHype('BOOM');
+        }
+        void MatchService.saveVisit(matchId, currentPlayer.id, newDarts, false);
+        turnTimerRef.current = setTimeout(() => {
+          setDartsThrown([]);
+          setCurrentTurnIndex((prev) => (prev + 1) % activePlayers.length);
+          isTransitioningRef.current = false;
+          setIsTransitioning(false);
         }, 2000);
       }
     }
@@ -229,7 +277,7 @@ export default function X01PlayTest() {
             activeGooierName={activeUser?.username || "Gooier"}
             dartsThrownCount={dartsThrown.length}
             onThrow={handleThrow}
-            onEndTurn={() => { if(!isTransitioning) { setDartsThrown([]); setCurrentTurnIndex((currentTurnIndex + 1) % activePlayers.length); } }}
+            onEndTurn={endTurnManually}
             onToggle={(expanded) => setIsPadExpanded(expanded)}
             color="#2563eb"
           />

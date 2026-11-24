@@ -15,6 +15,8 @@ import { VisualDartboard } from '@/components/VisualDartboard';
 import { ReactionOverlay } from '@/components/ReactionOverlay';
 import { NewRecordModal } from '@/components/NewRecordModal';
 import { GolfScorecard } from '@/components/GolfScorecard';
+import { AutodartsStatusBadge } from '@/components/AutodartsStatusBadge';
+import { useAutodarts } from '@/lib/hooks/useAutodarts';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
@@ -110,6 +112,19 @@ export default function GolfPage() {
     await ArcadeService.saveGameState(matchId, nextState);
   };
 
+  useAutodarts({
+    enabled: !!matchId && !!gameState && !gameState.isFinished,
+    matchId: matchId || undefined,
+    onThrow: (dart) => {
+      void onThrow(dart.score, dart.multiplier, dart.raw);
+    },
+    onTakeout: () => {
+      if (gameState && gameState.currentVisitDarts.length > 0 && !gameState.isFinished) {
+        void bankTurn();
+      }
+    },
+  });
+
   const dartsStatus = useMemo(() => {
     if (!gameState) return [];
     return gameState.currentVisitDarts.map(d => {
@@ -150,7 +165,10 @@ export default function GolfPage() {
             <p className="text-emerald-400 font-black uppercase text-[10px] tracking-[0.3em]">Hole {gameState.currentHole} / {gameState.totalHoles}</p>
             <h1 className="text-xl font-black italic uppercase text-white leading-none">Pylkoors Golf Club</h1>
         </div>
-        <GameInfo title="Golf" color="#10b981" rules={["Last dart thrown counts.", "Bank early to save score.", "Bunker = +2, Water = +3.", "Under Par (Negative) is good!"]} />
+        <div className="flex items-center gap-3">
+          <AutodartsStatusBadge />
+          <GameInfo title="Golf" color="#10b981" rules={["Last dart thrown counts.", "Bank early to save score.", "Bunker = +2, Water = +3.", "Under Par (Negative) is good!"]} />
+        </div>
       </div>
 
       <div className="relative z-10 flex items-center justify-center px-4 md:px-8 pb-4 overflow-hidden h-full">

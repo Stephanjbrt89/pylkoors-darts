@@ -15,6 +15,8 @@ import { VisualDartboard } from '@/components/VisualDartboard';
 import { ReactionOverlay } from '@/components/ReactionOverlay';
 import { NewRecordModal } from '@/components/NewRecordModal';
 import { GooierRoulette } from '@/components/GooierRoulette';
+import { AutodartsStatusBadge } from '@/components/AutodartsStatusBadge';
+import { useAutodarts } from '@/lib/hooks/useAutodarts';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
@@ -76,6 +78,30 @@ export default function AroundTheWorldPage() {
     await ArcadeService.saveGameState(matchId, nextState);
   };
 
+  const handleEndTurn = () => {
+    if (!gameState || !matchId || gameState.isFinished) return;
+    const nextState = {
+      ...gameState,
+      currentTurnIndex: (gameState.currentTurnIndex + 1) % gameState.players.length,
+      dartsThrown: [],
+    };
+    setGameState(nextState);
+    void ArcadeService.saveGameState(matchId, nextState);
+  };
+
+  useAutodarts({
+    enabled: !!matchId && gameState?.phase === 'PLAY' && !gameState?.isFinished,
+    matchId: matchId || undefined,
+    onThrow: (dart) => {
+      void handleHit(dart.score, dart.multiplier, dart.raw);
+    },
+    onTakeout: () => {
+      if (gameState && gameState.dartsThrown.length > 0 && !gameState.isFinished) {
+        handleEndTurn();
+      }
+    },
+  });
+
   if (showSquadSelect) return (
     <div className="relative min-h-screen bg-black">
       <SquadSelect gameName="ATW Journey" onStart={handleStartGame} onCancel={() => router.push('/')} />
@@ -99,7 +125,10 @@ export default function AroundTheWorldPage() {
       <div className="w-full flex justify-between items-center px-10 py-2 bg-black/40 border-b border-white/5 z-20">
         <Link href="/" className="bg-slate-900 border border-slate-700 px-6 py-2 rounded-full text-[10px] font-black uppercase hover:bg-red-600 transition">LOBBY</Link>
         <div className="text-center"><h1 className="text-xl font-black italic tracking-[0.3em] uppercase text-cyan-400">ATW Journey</h1></div>
-        <div className="text-right"><p className="text-[9px] font-black text-slate-500 uppercase leading-none mb-1">Darts</p><p className="text-2xl font-black text-white tabular-nums leading-none">{dartCount}</p></div>
+        <div className="flex items-center gap-4">
+          <AutodartsStatusBadge />
+          <div className="text-right"><p className="text-[9px] font-black text-slate-500 uppercase leading-none mb-1">Darts</p><p className="text-2xl font-black text-white tabular-nums leading-none">{dartCount}</p></div>
+        </div>
       </div>
 
       <div className="relative z-10 flex flex-col items-center justify-center p-4 h-full">

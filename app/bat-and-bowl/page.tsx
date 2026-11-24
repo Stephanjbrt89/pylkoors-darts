@@ -13,6 +13,8 @@ import { ArcadeNumpad } from '@/components/ArcadeNumpad';
 import { VisualDartboard } from '@/components/VisualDartboard';
 import { ReactionOverlay } from '@/components/ReactionOverlay';
 import { GooierRoulette } from '@/components/GooierRoulette';
+import { AutodartsStatusBadge } from '@/components/AutodartsStatusBadge';
+import { useAutodarts } from '@/lib/hooks/useAutodarts';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
@@ -65,6 +67,25 @@ export default function BatAndBowlPage() {
     await ArcadeService.saveGameState(matchId, nextState);
   };
 
+  useAutodarts({
+    enabled: !!matchId && gameState?.phase === 'PLAY' && !gameState?.winnerId,
+    matchId: matchId || undefined,
+    onThrow: (dart) => {
+      void onThrow(dart.score, dart.multiplier, dart.raw);
+    },
+    onTakeout: () => {
+      if (gameState && matchId && gameState.phase === 'PLAY' && gameState.dartsThrown.length > 0) {
+        const nextState = {
+          ...gameState,
+          currentTurnIndex: (gameState.currentTurnIndex + 1) % gameState.players.length,
+          dartsThrown: [],
+        };
+        setGameState(nextState);
+        void ArcadeService.saveGameState(matchId, nextState);
+      }
+    },
+  });
+
   if (showSquadSelect) return (
     <div className="relative min-h-screen bg-black">
       <SquadSelect gameName="Bat & Bowl" minPlayers={1} maxPlayers={2} onStart={handleStartGame} onCancel={() => router.push('/')} />
@@ -103,7 +124,7 @@ export default function BatAndBowlPage() {
       <div className="w-full flex justify-between items-center px-10 py-2 bg-black/40 border-b border-white/5 z-20">
         <Link href="/" className="bg-slate-900 border border-slate-700 px-6 py-2 rounded-full text-[10px] font-black uppercase hover:bg-red-600 transition">QUIT</Link>
         <p className="text-[#00FF66] font-black uppercase text-[10px] tracking-[0.3em] italic">Innings {gameState.innings}</p>
-        <div className="w-20" />
+        <AutodartsStatusBadge />
       </div>
 
       <div className="relative z-10 flex items-center justify-center p-4 h-full overflow-hidden">

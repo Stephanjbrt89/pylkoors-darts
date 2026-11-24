@@ -11,6 +11,8 @@ import { ReactionOverlay } from '@/components/ReactionOverlay';
 import { GameInfo } from '@/components/GameInfo';
 import { ArcadeNumpad } from '@/components/ArcadeNumpad';
 import { GooierRoulette } from '@/components/GooierRoulette';
+import { AutodartsStatusBadge } from '@/components/AutodartsStatusBadge';
+import { useAutodarts } from '@/lib/hooks/useAutodarts';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
@@ -68,6 +70,34 @@ export default function KillerPage() {
     await ArcadeService.saveGameState(matchId, nextState);
   };
 
+  useAutodarts({
+    enabled: !!matchId && !!gameState && !gameState.isFinished,
+    matchId: matchId || undefined,
+    onThrow: (dart) => {
+      if (gameState && !gameState.pendingChoice && !gameState.isFinished) {
+        void onHit(dart.score, dart.multiplier, dart.raw);
+      }
+    },
+    onTakeout: () => {
+      if (
+        gameState &&
+        matchId &&
+        gameState.phase === 'PLAY' &&
+        gameState.dartsThrown.length > 0 &&
+        !gameState.pendingChoice &&
+        !gameState.isFinished
+      ) {
+        const nextState = {
+          ...gameState,
+          currentTurnIndex: (gameState.currentTurnIndex + 1) % gameState.players.length,
+          dartsThrown: [],
+        };
+        setGameState(nextState);
+        void ArcadeService.saveGameState(matchId, nextState);
+      }
+    },
+  });
+
   if (showSquadSelect) return <SquadSelect gameName="Killer Tactics" minPlayers={1} maxPlayers={4} onStart={handleSquadConfirmed} onCancel={() => router.push('/')} />;
   
   if (showDifficultySelect) return (
@@ -123,7 +153,10 @@ export default function KillerPage() {
             </div>
           ))}
         </div>
-        <div className="bg-slate-900/80 px-4 py-1 rounded-full border border-white/10 text-[9px] font-black text-yellow-500 uppercase">{difficulty} MODE</div>
+        <div className="flex items-center gap-3">
+          <AutodartsStatusBadge />
+          <div className="bg-slate-900/80 px-4 py-1 rounded-full border border-white/10 text-[9px] font-black text-yellow-500 uppercase">{difficulty} MODE</div>
+        </div>
       </div>
 
       <div className="relative z-10 flex items-center justify-center p-2 overflow-hidden h-full">

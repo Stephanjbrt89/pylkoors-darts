@@ -14,6 +14,8 @@ import { ArcadeNumpad } from '@/components/ArcadeNumpad';
 import { VisualDartboard } from '@/components/VisualDartboard';
 import { ReactionOverlay } from '@/components/ReactionOverlay';
 import { GooierRoulette } from '@/components/GooierRoulette';
+import { AutodartsStatusBadge } from '@/components/AutodartsStatusBadge';
+import { useAutodarts } from '@/lib/hooks/useAutodarts';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
@@ -76,6 +78,25 @@ export default function HalfeertjiesPage() {
     await ArcadeService.saveGameState(matchId, nextState);
   };
 
+  useAutodarts({
+    enabled: !!matchId && gameState?.phase === 'PLAY' && !gameState?.isFinished,
+    matchId: matchId || undefined,
+    onThrow: (dart) => {
+      void handleHit(dart.score, dart.multiplier, dart.raw);
+    },
+    onTakeout: () => {
+      if (gameState && matchId && gameState.phase === 'PLAY' && gameState.dartsThrown.length > 0 && !gameState.isFinished) {
+        const nextState = {
+          ...gameState,
+          currentTurnIndex: (gameState.currentTurnIndex + 1) % gameState.players.length,
+          dartsThrown: [],
+        };
+        setGameState(nextState);
+        void ArcadeService.saveGameState(matchId, nextState);
+      }
+    },
+  });
+
   if (showSquadSelect) return (
     <div className="relative min-h-screen bg-black">
       <SquadSelect gameName="Halfeertjies" onStart={handleStartGame} onCancel={() => router.push('/')} />
@@ -112,7 +133,7 @@ export default function HalfeertjiesPage() {
       <div className="w-full flex justify-between items-center px-10 py-2 bg-black/40 border-b border-white/5 z-20">
         <Link href="/" className="bg-slate-900 border border-slate-700 px-6 py-2 rounded-full text-[10px] font-black uppercase hover:bg-red-600 transition shadow-lg">BACK TO LOBBY</Link>
         <h1 className="text-xl font-black italic text-yellow-500 uppercase">Halfeertjies</h1>
-        <div className="w-20" /> 
+        <AutodartsStatusBadge />
       </div>
 
       <div className="w-full flex gap-2 overflow-x-auto no-scrollbar py-4 px-10 border-b border-white/5 bg-white/5 shrink-0">

@@ -13,6 +13,8 @@ import { GameInfo } from '@/components/GameInfo';
 import { ArcadeNumpad } from '@/components/ArcadeNumpad';
 import { ReactionOverlay } from '@/components/ReactionOverlay';
 import { NewRecordModal } from '@/components/NewRecordModal';
+import { AutodartsStatusBadge } from '@/components/AutodartsStatusBadge';
+import { useAutodarts } from '@/lib/hooks/useAutodarts';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
@@ -73,6 +75,25 @@ export default function BrandySpecialPage() {
     await ArcadeService.saveGameState(matchId, nextState);
   };
 
+  useAutodarts({
+    enabled: !!matchId && gameState?.phase === 'PLAY' && !gameState?.isFinished,
+    matchId: matchId || undefined,
+    onThrow: (dart) => {
+      void onThrow(dart.score, dart.multiplier, dart.raw);
+    },
+    onTakeout: () => {
+      if (gameState && matchId && gameState.phase === 'PLAY' && gameState.dartsThrown.length > 0 && !gameState.isFinished) {
+        const nextState = {
+          ...gameState,
+          currentTurnIndex: (gameState.currentTurnIndex + 1) % gameState.players.length,
+          dartsThrown: [],
+        };
+        setGameState(nextState);
+        void ArcadeService.saveGameState(matchId, nextState);
+      }
+    },
+  });
+
   if (showSquadSelect) return (
     <div className="relative min-h-screen bg-black">
       <SquadSelect gameName="Brandy Special" minPlayers={1} maxPlayers={4} onStart={handleStartGame} onCancel={() => router.push('/')} />
@@ -95,7 +116,7 @@ export default function BrandySpecialPage() {
       <div className="w-full flex justify-between items-center px-10 py-2 bg-black/40 border-b border-amber-900/20 z-20 shrink-0">
         <Link href="/" className="bg-slate-900 border border-slate-700 px-6 py-2 rounded-full text-[10px] font-black uppercase hover:bg-red-600 transition">BACK TO BAR</Link>
         <h1 className="text-xl font-black italic tracking-[0.3em] uppercase text-amber-500">Brandy Special</h1>
-        <div className="w-20" />
+        <AutodartsStatusBadge />
       </div>
 
       {/* 2. THE BAR STAGE */}

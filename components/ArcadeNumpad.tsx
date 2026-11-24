@@ -33,7 +33,7 @@ export const ArcadeNumpad = ({ activeGooierName, dartsThrownCount, dartsStatus =
     if (multiplier === -1 || multiplier === 0) {
         onThrow(0, multiplier, overrideLabel || "MISS");
     } else if (score === 25) {
-      if (multiplier === 2) onThrow(50, 2, "D-BULL");
+      if (multiplier === 2) onThrow(25, 2, "D-BULL");
       else onThrow(25, 1, "BULL");
     } else {
       onThrow(score, multiplier, `${multiplier === 3 ? 'T' : multiplier === 2 ? 'D' : 'S'}${score}`);
