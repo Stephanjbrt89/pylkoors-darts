@@ -21,6 +21,7 @@ export interface BrandyState {
   phase: 'PLAY' | 'FINISHED'; // Simplified: no more roulette or choice
   lastActionSummary: string | null;
   lastActionType: 'OVERPOUR' | 'CAP' | 'POUR' | 'NONE';
+  turnLocked?: boolean;
 }
 
 export const BrandyEngine = {
@@ -50,7 +51,9 @@ export const BrandyEngine = {
   },
 
   handleThrow: (state: BrandyState, dart: Dart): BrandyState => {
-    if (state.phase !== 'PLAY' || state.isFinished) return state;
+    if (state.phase !== 'PLAY' || state.isFinished || state.turnLocked || state.dartsThrown.length >= 3) {
+      return state;
+    }
 
     const newState = { ...state, players: state.players.map(p => ({ ...p })) };
     const currentPlayer = newState.players[newState.currentTurnIndex];
@@ -83,13 +86,21 @@ export const BrandyEngine = {
     }
 
     const currentDarts = [...newState.dartsThrown, dart];
-    if (currentDarts.length === 3 || newState.isFinished || newState.lastActionType === 'OVERPOUR') {
-      newState.dartsThrown = [];
-      newState.currentTurnIndex = (newState.currentTurnIndex + 1) % newState.players.length;
-    } else {
-      newState.dartsThrown = currentDarts;
+    newState.dartsThrown = currentDarts;
+    if (!newState.isFinished && (currentDarts.length >= 3 || newState.lastActionType === 'OVERPOUR')) {
+      newState.turnLocked = true;
     }
 
     return newState;
-  }
+  },
+
+  endTurn: (state: BrandyState): BrandyState => {
+    if (state.phase !== 'PLAY' || state.isFinished) return state;
+    return {
+      ...state,
+      dartsThrown: [],
+      turnLocked: false,
+      currentTurnIndex: (state.currentTurnIndex + 1) % state.players.length,
+    };
+  },
 };

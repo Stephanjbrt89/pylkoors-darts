@@ -37,11 +37,13 @@ export const ATWEngine = {
   }),
 
   handleThrow: (state: ATWState, dart: Dart): ATWState => {
-    if (state.isFinished) return state;
+    if (state.isFinished || state.dartsThrown.length >= 3) return state;
 
     const newState = { ...state, players: state.players.map(p => ({ ...p })) };
     const currentPlayer = newState.players[newState.currentTurnIndex];
     const targetValue = newState.targets[currentPlayer.currentTargetIndex];
+    const newDarts = [...newState.dartsThrown, dart];
+    newState.dartsThrown = newDarts;
 
     if (dart.score === targetValue) {
       if (dart.score === 25) {
@@ -56,21 +58,21 @@ export const ATWEngine = {
 
       if (dart.score === 25) {
         newState.isFinished = true;
-        newState.phase = 'FINISHED'; // Update phase
+        newState.phase = 'FINISHED';
         newState.winnerId = currentPlayer.id;
         return newState;
       }
     }
 
-    const newDarts = [...newState.dartsThrown, dart];
-    
-    if (newDarts.length === 3) {
-      newState.dartsThrown = [];
-      newState.currentTurnIndex = (newState.currentTurnIndex + 1) % newState.players.length;
-    } else {
-      newState.dartsThrown = newDarts;
-    }
-
     return newState;
-  }
+  },
+
+  endTurn: (state: ATWState): ATWState => {
+    if (state.isFinished) return state;
+    return {
+      ...state,
+      dartsThrown: [],
+      currentTurnIndex: (state.currentTurnIndex + 1) % state.players.length,
+    };
+  },
 };

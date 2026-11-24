@@ -11,10 +11,12 @@ import { SquadSelect } from '@/components/SquadSelect';
 import { ArcadeLogo } from '@/components/ArcadeLogo';
 import { GameInfo } from '@/components/GameInfo';
 import { ArcadeNumpad } from '@/components/ArcadeNumpad';
+import { VisitDartsBar } from '@/components/VisitDartsBar';
 import { ReactionOverlay } from '@/components/ReactionOverlay';
 import { NewRecordModal } from '@/components/NewRecordModal';
 import { AutodartsStatusBadge } from '@/components/AutodartsStatusBadge';
 import { useAutodarts } from '@/lib/hooks/useAutodarts';
+import { useTurnHold } from '@/lib/hooks/useTurnHold';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
@@ -50,8 +52,26 @@ export default function BrandySpecialPage() {
     }
   };
 
+  const advanceTurn = () => {
+    if (!gameState || !matchId || gameState.phase !== 'PLAY' || gameState.isFinished) return;
+    setHistory((prev) => [...prev.slice(-29), gameState]);
+    const nextState = BrandyEngine.endTurn(gameState);
+    setGameState(nextState);
+    void ArcadeService.saveGameState(matchId, nextState);
+  };
+
+  const {
+    isHoldingTurn,
+    isHoldingRef,
+    markTurnComplete,
+    cancelTurnHold,
+    requestTakeoutAdvance,
+    advanceImmediately,
+  } = useTurnHold(advanceTurn);
+
   const handleUndo = () => {
     if (history.length === 0 || !matchId) return;
+    cancelTurnHold();
     const prevSnap = history[history.length - 1];
     setHistory((prev) => prev.slice(0, -1));
     setGameState(prevSnap);
@@ -61,18 +81,11 @@ export default function BrandySpecialPage() {
 
   const handleEndTurn = () => {
     if (!gameState || !matchId || gameState.phase !== 'PLAY' || gameState.isFinished) return;
-    setHistory((prev) => [...prev.slice(-29), gameState]);
-    const nextState = {
-      ...gameState,
-      currentTurnIndex: (gameState.currentTurnIndex + 1) % gameState.players.length,
-      dartsThrown: [],
-    };
-    setGameState(nextState);
-    void ArcadeService.saveGameState(matchId, nextState);
+    advanceImmediately();
   };
 
   const onThrow = async (score: number, multiplier: number, label: string) => {
-    if (!gameState || !matchId || gameState.phase !== 'PLAY' || gameState.isFinished) return;
+    if (!gameState || !matchId || gameState.phase !== 'PLAY' || gameState.isFinished || isHoldingRef.current || gameState.turnLocked || gameState.dartsThrown.length >= 3) return;
     setHistory((prev) => [...prev.slice(-29), gameState]);
     
     const nextState = BrandyEngine.handleThrow(gameState, { score, multiplier, raw: label });
@@ -86,6 +99,7 @@ export default function BrandySpecialPage() {
     }
 
     if (nextState.isFinished && nextState.winnerId) {
+      cancelTurnHold();
       SoundService.play('win');
       setReactionUrl(GifService.getRandomGifUrl('WINNER'));
       await MatchService.finishMatch(matchId, nextState.winnerId);
@@ -93,6 +107,8 @@ export default function BrandySpecialPage() {
       if (winner) {
         await StatsService.updateRecord('ARCADE_BRANDY', 'FEWEST_DARTS', winner.id, winner.totalDarts, matchId);
       }
+    } else if (nextState.turnLocked || nextState.dartsThrown.length >= 3) {
+      markTurnComplete();
     }
     setGameState(nextState);
     await ArcadeService.saveGameState(matchId, nextState);
@@ -102,11 +118,13 @@ export default function BrandySpecialPage() {
     enabled: !!matchId && gameState?.phase === 'PLAY' && !gameState?.isFinished,
     matchId: matchId || undefined,
     onThrow: (dart) => {
-      void onThrow(dart.score, dart.multiplier, dart.raw);
+      if (!isHoldingRef.current && (!gameState || (!gameState.turnLocked && gameState.dartsThrown.length < 3))) {
+        void onThrow(dart.score, dart.multiplier, dart.raw);
+      }
     },
     onTakeout: () => {
       if (gameState && gameState.dartsThrown.length > 0 && !gameState.isFinished) {
-        handleEndTurn();
+        requestTakeoutAdvance();
       }
     },
   });
@@ -140,10 +158,10 @@ export default function BrandySpecialPage() {
       <div className="relative z-10 flex flex-col items-center justify-center p-4 h-full overflow-hidden">
         <div className={`w-full max-w-[1800px] transition-all duration-1000 flex flex-col items-center h-full justify-around ${isPadExpanded ? 'scale-90' : 'scale-100'}`}>
             
-            <div className="flex justify-center gap-6 mb-4">
+            <div className="flex justify-center gap-6 mb-1">
                 {gameState.players.map((p, idx) => (
-                    <div key={p.id} className={`flex items-center gap-4 p-4 rounded-3xl border-2 transition-all duration-500 ${idx === gameState.currentTurnIndex ? 'border-amber-500 bg-amber-500/10 scale-110 shadow-lg' : 'opacity-30 grayscale'}`}>
-                        <img src={p.avatar_url} className="w-14 h-14 rounded-full object-cover bg-black border-2 border-white/10" alt="" />
+                    <div key={p.id} className={`flex items-center gap-4 p-3 rounded-3xl border-2 transition-all duration-500 ${idx === gameState.currentTurnIndex ? 'border-amber-500 bg-amber-500/10 scale-105 shadow-lg' : 'opacity-30 grayscale'}`}>
+                        <img src={p.avatar_url} className="w-12 h-12 rounded-full object-cover bg-black border-2 border-white/10" alt="" />
                         <div>
                             <p className="text-[10px] font-black uppercase text-amber-600 leading-none mb-1">{p.username}</p>
                             <p className="text-3xl font-black tabular-nums leading-none">{p.completedGlasses} / 4</p>
@@ -151,6 +169,15 @@ export default function BrandySpecialPage() {
                     </div>
                 ))}
             </div>
+
+            <VisitDartsBar
+              darts={gameState.dartsThrown}
+              canUndo={history.length > 0}
+              onUndoLast={handleUndo}
+              awaitingTakeout={isHoldingTurn || Boolean(gameState.turnLocked) || gameState.dartsThrown.length >= 3}
+              onNextTurn={handleEndTurn}
+              compact
+            />
 
             <div className="grid grid-cols-4 gap-12 w-full max-w-5xl px-10">
                 {[...Array(4)].map((_, i) => {
@@ -184,6 +211,7 @@ export default function BrandySpecialPage() {
             dartsThrownCount={gameState.dartsThrown.length}
             lastDarts={gameState.dartsThrown}
             canUndo={history.length > 0}
+            awaitingTakeout={isHoldingTurn || Boolean(gameState.turnLocked) || gameState.dartsThrown.length >= 3}
             onUndo={handleUndo}
             onThrow={onThrow}
             onEndTurn={handleEndTurn}

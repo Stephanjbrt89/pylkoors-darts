@@ -19,6 +19,7 @@ export interface HalfeertjiesState {
   phase: 'ROULETTE' | 'PLAY' | 'FINISHED';
   isFinished: boolean;
   winnerId: string | null;
+  turnResolved?: boolean;
 }
 
 export const HalfeertjiesEngine = {
@@ -81,14 +82,16 @@ export const HalfeertjiesEngine = {
   },
 
   handleThrow: (state: HalfeertjiesState, dart: Dart): HalfeertjiesState => {
-    if (state.phase !== 'PLAY' || state.isFinished) return state;
+    if (state.phase !== 'PLAY' || state.isFinished || state.turnResolved || state.dartsThrown.length >= 3) {
+      return state;
+    }
     
     const newState = { ...state, players: state.players.map(p => ({ ...p })) };
     const currentPlayer = newState.players[newState.currentTurnIndex];
 
     const currentDarts = [...newState.dartsThrown, dart];
+    newState.dartsThrown = currentDarts;
     if (currentDarts.length < 3) {
-      newState.dartsThrown = currentDarts;
       return newState;
     }
 
@@ -117,8 +120,17 @@ export const HalfeertjiesEngine = {
       currentPlayer.score = Math.floor(currentPlayer.score / 2);
     }
 
+    newState.turnResolved = true;
+    return newState;
+  },
+
+  endTurn: (state: HalfeertjiesState): HalfeertjiesState => {
+    if (state.phase !== 'PLAY' || state.isFinished) return state;
+    const newState = { ...state, players: state.players.map(p => ({ ...p })) };
     newState.dartsThrown = [];
-    let nextIdx = (newState.currentTurnIndex + 1) % newState.players.length;
+    newState.turnResolved = false;
+
+    const nextIdx = (newState.currentTurnIndex + 1) % newState.players.length;
     if (nextIdx === 0) {
       newState.roundIndex++;
       if (newState.roundIndex >= newState.targets.length) {
@@ -129,5 +141,5 @@ export const HalfeertjiesEngine = {
     }
     newState.currentTurnIndex = nextIdx;
     return newState;
-  }
+  },
 };

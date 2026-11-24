@@ -11,8 +11,10 @@ import { ReactionOverlay } from '@/components/ReactionOverlay';
 import { GooierFighter } from '@/components/GooierFighter';
 import { GameInfo } from '@/components/GameInfo';
 import { ArcadeNumpad } from '@/components/ArcadeNumpad';
+import { VisitDartsBar } from '@/components/VisitDartsBar';
 import { AutodartsStatusBadge } from '@/components/AutodartsStatusBadge';
 import { useAutodarts } from '@/lib/hooks/useAutodarts';
+import { useTurnHold } from '@/lib/hooks/useTurnHold';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
@@ -45,8 +47,26 @@ export default function FightGamePage() {
     } catch (err) { console.error(err); }
   };
 
+  const advanceTurn = () => {
+    if (!gameState || !matchId || gameState.phase !== 'PLAY' || gameState.isFinished) return;
+    setHistory((prev) => [...prev.slice(-29), gameState]);
+    const nextState = FightEngine.endTurn(gameState);
+    setGameState(nextState);
+    void ArcadeService.saveGameState(matchId, nextState);
+  };
+
+  const {
+    isHoldingTurn,
+    isHoldingRef,
+    markTurnComplete,
+    cancelTurnHold,
+    requestTakeoutAdvance,
+    advanceImmediately,
+  } = useTurnHold(advanceTurn);
+
   const handleUndo = () => {
     if (history.length === 0 || !matchId) return;
+    cancelTurnHold();
     const prevSnap = history[history.length - 1];
     setHistory((prev) => prev.slice(0, -1));
     setGameState(prevSnap);
@@ -59,20 +79,11 @@ export default function FightGamePage() {
 
   const handleEndTurn = () => {
     if (!gameState || !matchId || gameState.phase !== 'PLAY' || gameState.isFinished) return;
-    setHistory((prev) => [...prev.slice(-29), gameState]);
-    let nextIdx = (gameState.currentTurnIndex + 1) % gameState.players.length;
-    let guard = 0;
-    while (gameState.players[nextIdx]?.isEliminated && guard < gameState.players.length) {
-      nextIdx = (nextIdx + 1) % gameState.players.length;
-      guard++;
-    }
-    const nextState = { ...gameState, currentTurnIndex: nextIdx, dartsThrown: [] };
-    setGameState(nextState);
-    void ArcadeService.saveGameState(matchId, nextState);
+    advanceImmediately();
   };
 
   const handleThrow = async (score: number, multiplier: number, label: string) => {
-    if (!gameState || !matchId || gameState.isFinished) return;
+    if (!gameState || !matchId || gameState.isFinished || isHoldingRef.current || gameState.dartsThrown.length >= 3) return;
     setHistory((prev) => [...prev.slice(-29), gameState]);
     const nextState = FightEngine.handleThrow(gameState, { score, multiplier, raw: label });
 
@@ -90,9 +101,12 @@ export default function FightGamePage() {
     }
 
     if (nextState.isFinished && nextState.winnerId) {
+      cancelTurnHold();
       SoundService.play('win');
       setReactionUrl(GifService.getRandomGifUrl('WINNER'));
       await MatchService.finishMatch(matchId, nextState.winnerId);
+    } else if (nextState.dartsThrown.length >= 3) {
+      markTurnComplete();
     }
     setGameState(nextState);
     await ArcadeService.saveGameState(matchId, nextState);
@@ -102,11 +116,13 @@ export default function FightGamePage() {
     enabled: !!matchId && gameState?.phase === 'PLAY' && !gameState?.isFinished,
     matchId: matchId || undefined,
     onThrow: (dart) => {
-      void handleThrow(dart.score, dart.multiplier, dart.raw);
+      if (!isHoldingRef.current && (!gameState || gameState.dartsThrown.length < 3)) {
+        void handleThrow(dart.score, dart.multiplier, dart.raw);
+      }
     },
     onTakeout: () => {
       if (gameState && gameState.dartsThrown.length > 0 && !gameState.isFinished) {
-        handleEndTurn();
+        requestTakeoutAdvance();
       }
     },
   });
@@ -129,8 +145,18 @@ export default function FightGamePage() {
         </div>
       </div>
 
-      <div className="relative z-10 flex items-end justify-center px-10 pb-4 overflow-visible h-full flex-grow">
-        <div className={`flex justify-around items-end w-full max-w-[1700px] h-full transition-all duration-1000 ${isPadExpanded ? 'scale-90 pb-0' : 'scale-105 pb-10'}`}>
+      <div className="relative z-10 flex flex-col items-center justify-between px-10 pt-3 pb-4 overflow-hidden h-full flex-grow">
+        <div className="shrink-0 z-20 w-full flex justify-center">
+          <VisitDartsBar
+            darts={gameState.dartsThrown}
+            canUndo={history.length > 0}
+            onUndoLast={handleUndo}
+            awaitingTakeout={isHoldingTurn || gameState.dartsThrown.length >= 3}
+            onNextTurn={handleEndTurn}
+            compact
+          />
+        </div>
+        <div className={`flex justify-around items-end w-full max-w-[1700px] flex-1 min-h-0 transition-all duration-1000 ${isPadExpanded ? 'scale-90 pb-0' : 'scale-100 pb-6'}`}>
           {gameState.players.map((p, idx) => (
             <div key={p.id} className="relative flex-1 flex justify-center h-full items-end">
               <GooierFighter player={p} isActive={idx === gameState.currentTurnIndex} isDamaged={impactPlayerId === p.id} isHealed={healPlayerId === p.id} />
@@ -152,6 +178,7 @@ export default function FightGamePage() {
             dartsThrownCount={gameState.dartsThrown.length}
             lastDarts={gameState.dartsThrown}
             canUndo={history.length > 0}
+            awaitingTakeout={isHoldingTurn || gameState.dartsThrown.length >= 3}
             onUndo={handleUndo}
             onThrow={handleThrow}
             onEndTurn={handleEndTurn}

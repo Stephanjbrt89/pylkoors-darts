@@ -11,10 +11,12 @@ import { ArcadeLogo } from '@/components/ArcadeLogo';
 import { GameInfo } from '@/components/GameInfo';
 import { ArcadeNumpad } from '@/components/ArcadeNumpad';
 import { VisualDartboard } from '@/components/VisualDartboard';
+import { VisitDartsBar } from '@/components/VisitDartsBar';
 import { ReactionOverlay } from '@/components/ReactionOverlay';
 import { GooierRoulette } from '@/components/GooierRoulette';
 import { AutodartsStatusBadge } from '@/components/AutodartsStatusBadge';
 import { useAutodarts } from '@/lib/hooks/useAutodarts';
+import { useTurnHold } from '@/lib/hooks/useTurnHold';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
@@ -56,8 +58,26 @@ export default function BatAndBowlPage() {
     await ArcadeService.saveGameState(matchId, nextState);
   };
 
+  const advanceTurn = () => {
+    if (!gameState || !matchId || gameState.phase !== 'PLAY') return;
+    setHistory((prev) => [...prev.slice(-29), gameState]);
+    const nextState = BatAndBowlEngine.endTurn(gameState);
+    setGameState(nextState);
+    void ArcadeService.saveGameState(matchId, nextState);
+  };
+
+  const {
+    isHoldingTurn,
+    isHoldingRef,
+    markTurnComplete,
+    cancelTurnHold,
+    requestTakeoutAdvance,
+    advanceImmediately,
+  } = useTurnHold(advanceTurn);
+
   const handleUndo = () => {
     if (history.length === 0 || !matchId) return;
+    cancelTurnHold();
     const prevSnap = history[history.length - 1];
     setHistory((prev) => prev.slice(0, -1));
     setGameState(prevSnap);
@@ -67,24 +87,20 @@ export default function BatAndBowlPage() {
 
   const handleEndTurn = () => {
     if (!gameState || !matchId || gameState.phase !== 'PLAY') return;
-    setHistory((prev) => [...prev.slice(-29), gameState]);
-    const nextState = {
-      ...gameState,
-      currentTurnIndex: (gameState.currentTurnIndex + 1) % gameState.players.length,
-      dartsThrown: [],
-    };
-    setGameState(nextState);
-    void ArcadeService.saveGameState(matchId, nextState);
+    advanceImmediately();
   };
 
   const onThrow = async (score: number, multiplier: number, label: string) => {
-    if (!gameState || !matchId || gameState.phase !== 'PLAY') return;
+    if (!gameState || !matchId || gameState.phase !== 'PLAY' || isHoldingRef.current || gameState.turnLocked || gameState.dartsThrown.length >= 3) return;
     setHistory((prev) => [...prev.slice(-29), gameState]);
     const nextState = BatAndBowlEngine.handleThrow(gameState, { score, multiplier, raw: label });
     if (nextState.phase === 'FINISHED') {
+        cancelTurnHold();
         SoundService.play('win');
         setReactionUrl(GifService.getRandomGifUrl('WINNER'));
         if (nextState.winnerId) MatchService.finishMatch(matchId, nextState.winnerId);
+    } else if (nextState.phase === 'PLAY' && (nextState.turnLocked || nextState.dartsThrown.length >= 3)) {
+      markTurnComplete();
     }
     setGameState(nextState);
     await ArcadeService.saveGameState(matchId, nextState);
@@ -94,11 +110,13 @@ export default function BatAndBowlPage() {
     enabled: !!matchId && gameState?.phase === 'PLAY' && !gameState?.winnerId,
     matchId: matchId || undefined,
     onThrow: (dart) => {
-      void onThrow(dart.score, dart.multiplier, dart.raw);
+      if (!isHoldingRef.current && (!gameState || (!gameState.turnLocked && gameState.dartsThrown.length < 3))) {
+        void onThrow(dart.score, dart.multiplier, dart.raw);
+      }
     },
     onTakeout: () => {
-      if (gameState && gameState.dartsThrown.length > 0) {
-        handleEndTurn();
+      if (gameState && gameState.dartsThrown.length > 0 && !gameState.winnerId) {
+        requestTakeoutAdvance();
       }
     },
   });
@@ -152,8 +170,23 @@ export default function BatAndBowlPage() {
                 {gameState.innings === 2 && <div className="mt-8 bg-[#00FF66]/10 border-2 border-[#00FF66] p-4 rounded-3xl text-center"><p className="text-[10px] uppercase">Needed</p><span className="text-4xl font-black">{Math.max(0, (gameState.innings_1_target! + 1) - batsman.score)}</span></div>}
             </div>
 
-            <div className="flex-grow flex items-center justify-center">
-                <div className={`transition-all duration-1000 ${isPadExpanded ? 'scale-100' : 'scale-125'}`}>
+            <div className="flex-1 flex flex-col items-center justify-center gap-3 h-full min-w-0">
+                <VisitDartsBar
+                  darts={gameState.dartsThrown}
+                  showTotal={currentPlayer.role === 'batting'}
+                  canUndo={history.length > 0}
+                  onUndoLast={handleUndo}
+                  awaitingTakeout={isHoldingTurn || Boolean(gameState.turnLocked) || gameState.dartsThrown.length >= 3}
+                  onNextTurn={handleEndTurn}
+                  compact
+                />
+                <div
+                  className={`transition-all duration-500 flex items-center justify-center shrink-0 ${
+                    isPadExpanded
+                      ? 'h-[min(42vh,400px)] w-[min(42vh,400px)]'
+                      : 'h-[min(58vh,580px)] w-[min(58vh,580px)]'
+                  }`}
+                >
                     <VisualDartboard lastDarts={gameState.dartsThrown} highlight={currentPlayer.role === 'bowling' ? (bowler.wickets + 1) : null} />
                 </div>
             </div>
@@ -175,6 +208,7 @@ export default function BatAndBowlPage() {
             dartsThrownCount={gameState.dartsThrown.length}
             lastDarts={gameState.dartsThrown}
             canUndo={history.length > 0}
+            awaitingTakeout={isHoldingTurn || Boolean(gameState.turnLocked) || gameState.dartsThrown.length >= 3}
             onUndo={handleUndo}
             onThrow={onThrow}
             onEndTurn={handleEndTurn}

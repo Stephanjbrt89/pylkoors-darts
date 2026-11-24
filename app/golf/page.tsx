@@ -12,11 +12,13 @@ import { ArcadeLogo } from '@/components/ArcadeLogo';
 import { GameInfo } from '@/components/GameInfo';
 import { ArcadeNumpad } from '@/components/ArcadeNumpad';
 import { VisualDartboard } from '@/components/VisualDartboard';
+import { VisitDartsBar } from '@/components/VisitDartsBar';
 import { ReactionOverlay } from '@/components/ReactionOverlay';
 import { NewRecordModal } from '@/components/NewRecordModal';
 import { GolfScorecard } from '@/components/GolfScorecard';
 import { AutodartsStatusBadge } from '@/components/AutodartsStatusBadge';
 import { useAutodarts } from '@/lib/hooks/useAutodarts';
+import { useTurnHold } from '@/lib/hooks/useTurnHold';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
@@ -55,8 +57,43 @@ export default function GolfPage() {
     setTimeout(() => { setShowStatsOverlay(null); }, 4000);
   };
 
+  const bankTurn = async () => {
+    if (!gameState || !matchId || gameState.currentVisitDarts.length === 0) return;
+    setHistory((prev) => [...prev.slice(-29), gameState]);
+    const playerBanking = gameState.players[gameState.currentTurnIndex];
+    const bankedHole = gameState.currentHole;
+    const nextState = GolfEngine.bankAndAdvance(gameState);
+    
+    if (nextState.isFinished) {
+      void handleMatchEnd(nextState, matchId);
+    } else {
+      const updatedPlayer = nextState.players.find(p => p.id === playerBanking.id);
+      const holeScore = updatedPlayer?.holeScores[bankedHole];
+      if (typeof holeScore === 'number' && holeScore < 0) {
+        SoundService.play('180');
+        setReactionUrl(GifService.getRandomGifUrl('BOOM'));
+      }
+      triggerTurnRecap(updatedPlayer);
+    }
+    
+    setGameState(nextState);
+    await ArcadeService.saveGameState(matchId, nextState);
+  };
+
+  const {
+    isHoldingTurn,
+    isHoldingRef,
+    markTurnComplete,
+    cancelTurnHold,
+    requestTakeoutAdvance,
+    advanceImmediately,
+  } = useTurnHold(() => {
+    void bankTurn();
+  });
+
   const handleUndo = () => {
     if (history.length === 0 || !matchId) return;
+    cancelTurnHold();
     const prevSnap = history[history.length - 1];
     setHistory((prev) => prev.slice(0, -1));
     setGameState(prevSnap);
@@ -66,7 +103,7 @@ export default function GolfPage() {
   };
 
   const onThrow = async (score: number, multiplier: number, label: string) => {
-    if (!gameState || !matchId || gameState.isFinished) return;
+    if (!gameState || !matchId || gameState.isFinished || isHoldingRef.current || gameState.currentVisitDarts.length >= 3) return;
     setHistory((prev) => [...prev.slice(-29), gameState]);
 
     if (score === 50 || (score === 25 && multiplier === 2)) {
@@ -78,21 +115,10 @@ export default function GolfPage() {
     }
 
     const nextState = GolfEngine.handleThrow(gameState, { score, multiplier, raw: label });
-    
-    // Auto-bank logic
-    if (nextState.currentVisitDarts.length === 0 && !nextState.isFinished) {
-        const lastPlayerIdx = (nextState.currentTurnIndex - 1 + nextState.players.length) % nextState.players.length;
-        const playerRecap = nextState.players[lastPlayerIdx];
-        const lastHoleScore = playerRecap.holeScores[gameState.currentHole];
-        
-        if (lastHoleScore < 0) {
-          SoundService.play('180');
-          setReactionUrl(GifService.getRandomGifUrl('BOOM'));
-        }
-        triggerTurnRecap(playerRecap);
+    if (nextState.currentVisitDarts.length >= 3) {
+      markTurnComplete();
     }
 
-    if (nextState.isFinished) handleMatchEnd(nextState, matchId);
     setGameState(nextState);
     await ArcadeService.saveGameState(matchId, nextState);
   };
@@ -110,33 +136,17 @@ export default function GolfPage() {
     }
   };
 
-  const bankTurn = async () => {
-    if (!gameState || !matchId || gameState.currentVisitDarts.length === 0) return;
-    setHistory((prev) => [...prev.slice(-29), gameState]);
-    const playerBanking = gameState.players[gameState.currentTurnIndex];
-    const nextState = GolfEngine.bankAndAdvance(gameState);
-    
-    if (nextState.isFinished) {
-      handleMatchEnd(nextState, matchId);
-    } else {
-      // Find the updated player object from the next state to get the baked-in hole score
-      const updatedPlayer = nextState.players.find(p => p.id === playerBanking.id);
-      triggerTurnRecap(updatedPlayer);
-    }
-    
-    setGameState(nextState);
-    await ArcadeService.saveGameState(matchId, nextState);
-  };
-
   useAutodarts({
     enabled: !!matchId && !!gameState && !gameState.isFinished,
     matchId: matchId || undefined,
     onThrow: (dart) => {
-      void onThrow(dart.score, dart.multiplier, dart.raw);
+      if (!isHoldingRef.current && (!gameState || gameState.currentVisitDarts.length < 3)) {
+        void onThrow(dart.score, dart.multiplier, dart.raw);
+      }
     },
     onTakeout: () => {
       if (gameState && gameState.currentVisitDarts.length > 0 && !gameState.isFinished) {
-        void bankTurn();
+        requestTakeoutAdvance();
       }
     },
   });
@@ -197,8 +207,22 @@ export default function GolfPage() {
                 ))}
             </div>
 
-            <div className="flex-grow flex items-center justify-center h-full">
-                <div className={`transition-all duration-1000 drop-shadow-[0_0_100px_rgba(0,0,0,1)] ${isPadExpanded ? 'scale-[1.4]' : 'scale-[2.0]'}`}>
+            <div className="flex-1 flex flex-col items-center justify-center gap-3 h-full min-w-0">
+                <VisitDartsBar
+                  darts={gameState.currentVisitDarts}
+                  canUndo={history.length > 0}
+                  onUndoLast={handleUndo}
+                  awaitingTakeout={isHoldingTurn || gameState.currentVisitDarts.length >= 3}
+                  onNextTurn={advanceImmediately}
+                  compact
+                />
+                <div
+                  className={`transition-all duration-500 flex items-center justify-center shrink-0 ${
+                    isPadExpanded
+                      ? 'h-[min(42vh,400px)] w-[min(42vh,400px)]'
+                      : 'h-[min(60vh,600px)] w-[min(60vh,600px)]'
+                  }`}
+                >
                     <VisualDartboard lastDarts={gameState.currentVisitDarts} highlight={gameState.currentHole} />
                 </div>
             </div>
@@ -223,9 +247,10 @@ export default function GolfPage() {
             lastDarts={gameState.currentVisitDarts}
             dartsStatus={dartsStatus}
             canUndo={history.length > 0}
+            awaitingTakeout={isHoldingTurn || gameState.currentVisitDarts.length >= 3}
             onUndo={handleUndo}
             onThrow={onThrow}
-            onEndTurn={bankTurn}
+            onEndTurn={advanceImmediately}
             onToggle={setIsPadExpanded}
             color="#10b981"
             showGolfHazards={true}

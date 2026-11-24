@@ -23,6 +23,7 @@ export interface BatAndBowlState {
   phase: 'ROULETTE' | 'CHOICE' | 'PLAY' | 'FINISHED'; // Added CHOICE
   rouletteWinnerId: string | null;
   winnerId: string | null;
+  turnLocked?: boolean;
 }
 
 export const BatAndBowlEngine = {
@@ -66,7 +67,7 @@ export const BatAndBowlEngine = {
   },
 
   handleThrow: (state: BatAndBowlState, dart: Dart): BatAndBowlState => {
-    if (state.phase !== 'PLAY') return state;
+    if (state.phase !== 'PLAY' || state.turnLocked || state.dartsThrown.length >= 3) return state;
     const newState = { ...state, players: state.players.map(p => ({ ...p })) };
     const currentPlayer = newState.players[newState.currentTurnIndex];
     const batsman = newState.players.find(p => p.role === 'batting')!;
@@ -93,6 +94,7 @@ export const BatAndBowlEngine = {
           });
           newState.currentTurnIndex = newState.players.findIndex(p => p.role === 'batting');
           newState.dartsThrown = [];
+          newState.turnLocked = false;
           return newState;
         } else {
           newState.phase = 'FINISHED';
@@ -101,14 +103,24 @@ export const BatAndBowlEngine = {
       }
     }
     const currentDarts = [...newState.dartsThrown, dart];
-    if (currentDarts.length === 3) {
-      if (currentPlayer.role === 'batting') currentPlayer.rounds_batting += 1;
-      else currentPlayer.rounds_bowling += 1;
-      newState.dartsThrown = [];
-      newState.currentTurnIndex = (newState.currentTurnIndex + 1) % 2;
-    } else {
-      newState.dartsThrown = currentDarts;
+    newState.dartsThrown = currentDarts;
+    if (newState.phase === 'PLAY' && currentDarts.length >= 3) {
+      newState.turnLocked = true;
     }
     return newState;
-  }
+  },
+
+  endTurn: (state: BatAndBowlState): BatAndBowlState => {
+    if (state.phase !== 'PLAY') return state;
+    const newState = { ...state, players: state.players.map(p => ({ ...p })) };
+    const currentPlayer = newState.players[newState.currentTurnIndex];
+    if (currentPlayer) {
+      if (currentPlayer.role === 'batting') currentPlayer.rounds_batting += 1;
+      else currentPlayer.rounds_bowling += 1;
+    }
+    newState.dartsThrown = [];
+    newState.turnLocked = false;
+    newState.currentTurnIndex = (newState.currentTurnIndex + 1) % newState.players.length;
+    return newState;
+  },
 };

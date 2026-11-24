@@ -66,7 +66,7 @@ export const KillerEngine = {
   },
 
   handleThrow: (state: KillerState, dart: Dart): KillerState => {
-    if (state.isFinished) return state;
+    if (state.isFinished || (state.phase === 'PLAY' && state.dartsThrown.length >= 3)) return state;
     const newState = { ...state, players: state.players.map(p => ({ ...p, hits: { ...p.hits } })) };
     const currentPlayer = newState.players[newState.currentTurnIndex];
 
@@ -119,12 +119,7 @@ export const KillerEngine = {
     }
 
     const newDarts = [...newState.dartsThrown, dart];
-    if (newDarts.length === 3) {
-      newState.dartsThrown = [];
-      newState.currentTurnIndex = (newState.currentTurnIndex + 1) % newState.players.length;
-    } else {
-      newState.dartsThrown = newDarts;
-    }
+    newState.dartsThrown = newDarts;
 
     const allClosed = KILLER_TARGETS.every(t => currentPlayer.hits[t.toString()] >= 3);
     
@@ -137,5 +132,14 @@ export const KillerEngine = {
     }
 
     return newState;
-  }
+  },
+
+  endTurn: (state: KillerState): KillerState => {
+    if (state.phase !== 'PLAY' || state.isFinished) return state;
+    return {
+      ...state,
+      dartsThrown: [],
+      currentTurnIndex: (state.currentTurnIndex + 1) % state.players.length,
+    };
+  },
 };

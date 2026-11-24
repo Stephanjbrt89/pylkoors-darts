@@ -7,6 +7,7 @@ import { StatsService } from '@/lib/services/statsService';
 import { SoundService } from '@/lib/services/soundService';
 import { GifService } from '@/lib/services/gifService';
 import { VisualDartboard } from '@/components/VisualDartboard';
+import { VisitDartsBar } from '@/components/VisitDartsBar';
 import { X01ScoreSidebar } from '@/components/X01ScoreSidebar';
 import { ArcadeNumpad } from '@/components/ArcadeNumpad';
 import { ReactionOverlay } from '@/components/ReactionOverlay';
@@ -15,6 +16,7 @@ import { SquadSelect } from '@/components/SquadSelect';
 import { GameInfo } from '@/components/GameInfo';
 import { AutodartsStatusBadge } from '@/components/AutodartsStatusBadge';
 import { useAutodarts } from '@/lib/hooks/useAutodarts';
+import { useTurnHold } from '@/lib/hooks/useTurnHold';
 import { Dart } from '@/types/schema';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -32,7 +34,7 @@ export default function X01PlayTest() {
   const [reactionUrl, setReactionUrl] = useState<string | null>(null);
   const [recordData, setRecordData] = useState<any>(null);
   const [isShaking, setIsShaking] = useState(false);
-  const [isTransitioning, setIsTransitioning] = useState(false);
+  const [isBustedTurn, setIsBustedTurn] = useState(false);
   const [playerStats, setPlayerStats] = useState<Record<string, { totalScored: number, dartCount: number }>>({});
   const [history, setHistory] = useState<Array<{
     currentTurnIndex: number;
@@ -40,22 +42,33 @@ export default function X01PlayTest() {
     dartsThrown: Dart[];
     playerStats: Record<string, { totalScored: number; dartCount: number }>;
     isWin: boolean;
+    isBustedTurn: boolean;
   }>>([]);
   
   // NEW: Track numpad expansion for board scaling
   const [isPadExpanded, setIsPadExpanded] = useState(false);
 
-  // Synchronous ref guards to prevent rapid-throw/takeout race conditions
-  const isTransitioningRef = useRef(false);
-  const turnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
   const router = useRouter();
 
-  useEffect(() => {
-    return () => {
-      if (turnTimerRef.current) clearTimeout(turnTimerRef.current);
-    };
-  }, []);
+  const advanceTurn = () => {
+    if (!matchId || isWin || activePlayers.length === 0) return;
+    const currentPlayer = activePlayers[currentTurnIndex];
+    if (dartsThrown.length > 0 && currentPlayer) {
+      void MatchService.saveVisit(matchId, currentPlayer.id, dartsThrown, isBustedTurn);
+    }
+    setDartsThrown([]);
+    setIsBustedTurn(false);
+    setCurrentTurnIndex((prev) => (prev + 1) % activePlayers.length);
+  };
+
+  const {
+    isHoldingTurn,
+    isHoldingRef,
+    markTurnComplete,
+    cancelTurnHold,
+    requestTakeoutAdvance,
+    advanceImmediately,
+  } = useTurnHold(advanceTurn);
 
   const pushHistory = () => {
     setHistory((prev) => [
@@ -68,18 +81,14 @@ export default function X01PlayTest() {
           Object.entries(playerStats).map(([k, v]) => [k, { ...v }])
         ),
         isWin,
+        isBustedTurn,
       },
     ]);
   };
 
   const handleUndo = () => {
     if (history.length === 0) return;
-    if (turnTimerRef.current) {
-      clearTimeout(turnTimerRef.current);
-      turnTimerRef.current = null;
-    }
-    isTransitioningRef.current = false;
-    setIsTransitioning(false);
+    cancelTurnHold();
 
     const prevSnapshot = history[history.length - 1];
     setHistory((prev) => prev.slice(0, -1));
@@ -88,19 +97,15 @@ export default function X01PlayTest() {
     setDartsThrown(prevSnapshot.dartsThrown);
     setPlayerStats(prevSnapshot.playerStats);
     setIsWin(prevSnapshot.isWin);
+    setIsBustedTurn(prevSnapshot.isBustedTurn);
     setReactionUrl(null);
     setRecordData(null);
   };
 
   const endTurnManually = () => {
-    if (!matchId || isTransitioningRef.current || isWin || activePlayers.length === 0) return;
+    if (!matchId || isWin || activePlayers.length === 0) return;
     pushHistory();
-    const currentPlayer = activePlayers[currentTurnIndex];
-    if (dartsThrown.length > 0 && currentPlayer) {
-      void MatchService.saveVisit(matchId, currentPlayer.id, dartsThrown, false);
-    }
-    setDartsThrown([]);
-    setCurrentTurnIndex((prev) => (prev + 1) % activePlayers.length);
+    advanceImmediately();
   };
 
   // Autodarts Real-Time Hardware Bridge (pre-connects during squad/target selection)
@@ -108,13 +113,13 @@ export default function X01PlayTest() {
     enabled: !isWin,
     matchId: matchId || undefined,
     onThrow: (dart) => {
-      if (matchId && !isTransitioningRef.current && !isWin) {
-        handleThrow(dart.score, dart.multiplier, dart.raw);
+      if (matchId && !isWin && !isHoldingRef.current && dartsThrown.length < 3) {
+        void handleThrow(dart.score, dart.multiplier, dart.raw);
       }
     },
     onTakeout: () => {
-      if (matchId && !isTransitioningRef.current && !isWin && dartsThrown.length > 0) {
-        endTurnManually();
+      if (matchId && !isWin && dartsThrown.length > 0) {
+        requestTakeoutAdvance();
       }
     },
   });
@@ -149,7 +154,7 @@ export default function X01PlayTest() {
   };
 
   const handleThrow = async (score: number, multiplier: number, label: string) => {
-    if (!matchId || isWin || isTransitioningRef.current) return;
+    if (!matchId || isWin || isHoldingRef.current || dartsThrown.length >= 3) return;
     const currentPlayer = activePlayers[currentTurnIndex];
     if (!currentPlayer) return;
 
@@ -163,7 +168,7 @@ export default function X01PlayTest() {
     const priorVisitPoints = dartsThrown.reduce((s, d) => s + (d.score * d.multiplier), 0);
 
     if (willWin) {
-      isTransitioningRef.current = true;
+      cancelTurnHold();
       setIsWin(true);
       setDartsThrown(newDarts);
       setScores(prev => ({ ...prev, [currentPlayer.id]: 0 }));
@@ -187,8 +192,7 @@ export default function X01PlayTest() {
       }
       await MatchService.finishMatch(matchId, currentPlayer.id);
     } else if (willBust) {
-      isTransitioningRef.current = true;
-      setIsTransitioning(true);
+      setIsBustedTurn(true);
       setDartsThrown(newDarts);
       // Revert any points scored earlier in this busted visit
       setScores(prev => ({ ...prev, [currentPlayer.id]: currentScore + priorVisitPoints }));
@@ -201,13 +205,7 @@ export default function X01PlayTest() {
       }));
       SoundService.play('bust');
       setReactionUrl(GifService.getRandomGifUrl('BUST'));
-      void MatchService.saveVisit(matchId, currentPlayer.id, newDarts, true);
-      turnTimerRef.current = setTimeout(() => {
-        setDartsThrown([]);
-        setCurrentTurnIndex((prev) => (prev + 1) % activePlayers.length);
-        isTransitioningRef.current = false;
-        setIsTransitioning(false);
-      }, 2000);
+      markTurnComplete();
     } else {
       setPlayerStats(prev => ({
         ...prev,
@@ -219,19 +217,11 @@ export default function X01PlayTest() {
       setScores(prev => ({ ...prev, [currentPlayer.id]: prev[currentPlayer.id] - (score * multiplier) }));
       setDartsThrown(newDarts);
       if (newDarts.length === 3) {
-        isTransitioningRef.current = true;
-        setIsTransitioning(true);
         if (newDarts.reduce((s, d) => s + (d.score * d.multiplier), 0) === 180) {
           SoundService.play('180');
           triggerHype('BOOM');
         }
-        void MatchService.saveVisit(matchId, currentPlayer.id, newDarts, false);
-        turnTimerRef.current = setTimeout(() => {
-          setDartsThrown([]);
-          setCurrentTurnIndex((prev) => (prev + 1) % activePlayers.length);
-          isTransitioningRef.current = false;
-          setIsTransitioning(false);
-        }, 2000);
+        markTurnComplete();
       }
     }
   };
@@ -283,18 +273,28 @@ export default function X01PlayTest() {
       </div>
 
       {/* 2. ARENA (Responsive scaling based on Numpad) */}
-      <div className="relative z-10 flex flex-row items-center justify-between px-12 h-full overflow-hidden">
-        <div className="w-[340px] hidden xl:block shrink-0" />
-
-        <div className="flex-grow flex items-center justify-center h-full">
-            <div className={`transition-all duration-1000 drop-shadow-[0_0_80px_rgba(0,0,0,1)] ${
-                isPadExpanded ? 'scale-[1.1] lg:scale-[1.3]' : 'scale-[1.5] lg:scale-[1.8]'
-            }`}>
-                <VisualDartboard lastDarts={dartsThrown} />
-            </div>
+      <div className="relative z-10 flex flex-row items-center justify-between h-full overflow-hidden">
+        <div className="flex-1 flex flex-col items-center justify-center h-full gap-3 px-4 md:px-8 py-2 min-w-0">
+          <VisitDartsBar
+            darts={dartsThrown}
+            showTotal={true}
+            canUndo={history.length > 0}
+            onUndoLast={handleUndo}
+            awaitingTakeout={isHoldingTurn || dartsThrown.length >= 3}
+            onNextTurn={endTurnManually}
+          />
+          <div
+            className={`transition-all duration-500 flex items-center justify-center shrink-0 ${
+              isPadExpanded
+                ? 'h-[min(45vh,430px)] w-[min(45vh,430px)]'
+                : 'h-[min(67vh,680px)] w-[min(67vh,680px)]'
+            }`}
+          >
+            <VisualDartboard lastDarts={dartsThrown} />
+          </div>
         </div>
 
-        <div className="w-[340px] flex flex-col gap-4 p-6 bg-black/40 border-l border-white/5 h-full justify-center shrink-0">
+        <div className="w-[280px] xl:w-[310px] flex flex-col gap-3 p-5 bg-black/40 border-l border-white/5 h-full justify-center shrink-0">
           <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.4em] mb-2 px-2 border-l-4 border-blue-600 pl-4 italic">Round Strength (PPR)</h3>
           {activePlayers.map((p, idx) => {
             const stat = playerStats[p.id];
@@ -323,6 +323,7 @@ export default function X01PlayTest() {
             dartsThrownCount={dartsThrown.length}
             lastDarts={dartsThrown}
             canUndo={history.length > 0}
+            awaitingTakeout={isHoldingTurn || dartsThrown.length >= 3}
             onUndo={handleUndo}
             onThrow={handleThrow}
             onEndTurn={endTurnManually}

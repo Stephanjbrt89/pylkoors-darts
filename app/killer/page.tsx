@@ -10,9 +10,11 @@ import { SquadSelect } from '@/components/SquadSelect';
 import { ReactionOverlay } from '@/components/ReactionOverlay';
 import { GameInfo } from '@/components/GameInfo';
 import { ArcadeNumpad } from '@/components/ArcadeNumpad';
+import { VisitDartsBar } from '@/components/VisitDartsBar';
 import { GooierRoulette } from '@/components/GooierRoulette';
 import { AutodartsStatusBadge } from '@/components/AutodartsStatusBadge';
 import { useAutodarts } from '@/lib/hooks/useAutodarts';
+import { useTurnHold } from '@/lib/hooks/useTurnHold';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
@@ -52,8 +54,26 @@ export default function KillerPage() {
     await ArcadeService.saveGameState(matchId, nextState);
   };
 
+  const advanceTurn = () => {
+    if (!gameState || !matchId || gameState.phase !== 'PLAY' || gameState.pendingChoice || gameState.isFinished) return;
+    setHistory((prev) => [...prev.slice(-29), gameState]);
+    const nextState = KillerEngine.endTurn(gameState);
+    setGameState(nextState);
+    void ArcadeService.saveGameState(matchId, nextState);
+  };
+
+  const {
+    isHoldingTurn,
+    isHoldingRef,
+    markTurnComplete,
+    cancelTurnHold,
+    requestTakeoutAdvance,
+    advanceImmediately,
+  } = useTurnHold(advanceTurn);
+
   const handleUndo = () => {
     if (history.length === 0 || !matchId) return;
+    cancelTurnHold();
     const prevSnap = history[history.length - 1];
     setHistory((prev) => prev.slice(0, -1));
     setGameState(prevSnap);
@@ -63,24 +83,20 @@ export default function KillerPage() {
 
   const handleEndTurn = () => {
     if (!gameState || !matchId || gameState.phase !== 'PLAY' || gameState.pendingChoice || gameState.isFinished) return;
-    setHistory((prev) => [...prev.slice(-29), gameState]);
-    const nextState = {
-      ...gameState,
-      currentTurnIndex: (gameState.currentTurnIndex + 1) % gameState.players.length,
-      dartsThrown: [],
-    };
-    setGameState(nextState);
-    void ArcadeService.saveGameState(matchId, nextState);
+    advanceImmediately();
   };
 
   const onHit = async (score: number, multiplier: number, label: string) => {
-    if (!gameState || !matchId || gameState.isFinished) return;
+    if (!gameState || !matchId || gameState.isFinished || isHoldingRef.current || (gameState.phase === 'PLAY' && gameState.dartsThrown.length >= 3)) return;
     setHistory((prev) => [...prev.slice(-29), gameState]);
     const nextState = KillerEngine.handleThrow(gameState, { score, multiplier, raw: label });
     if (nextState.isFinished) {
+      cancelTurnHold();
       SoundService.play('win');
       setReactionUrl(GifService.getRandomGifUrl('WINNER'));
       MatchService.finishMatch(matchId, nextState.winnerId!);
+    } else if (nextState.phase === 'PLAY' && !nextState.pendingChoice && nextState.dartsThrown.length >= 3) {
+      markTurnComplete();
     }
     setGameState(nextState);
     await ArcadeService.saveGameState(matchId, nextState);
@@ -89,6 +105,14 @@ export default function KillerPage() {
   const handleChoice = async (target: string) => {
     if (!gameState || !matchId || !gameState.pendingChoice) return;
     const nextState = KillerEngine.applyHit(gameState, gameState.pendingChoice.dart, target);
+    if (nextState.isFinished) {
+      cancelTurnHold();
+      SoundService.play('win');
+      setReactionUrl(GifService.getRandomGifUrl('WINNER'));
+      MatchService.finishMatch(matchId, nextState.winnerId!);
+    } else if (nextState.phase === 'PLAY' && nextState.dartsThrown.length >= 3) {
+      markTurnComplete();
+    }
     setGameState(nextState);
     await ArcadeService.saveGameState(matchId, nextState);
   };
@@ -97,13 +121,13 @@ export default function KillerPage() {
     enabled: !!matchId && !!gameState && !gameState.isFinished,
     matchId: matchId || undefined,
     onThrow: (dart) => {
-      if (gameState && !gameState.pendingChoice && !gameState.isFinished) {
+      if (gameState && !gameState.pendingChoice && !gameState.isFinished && !isHoldingRef.current && (gameState.phase !== 'PLAY' || gameState.dartsThrown.length < 3)) {
         void onHit(dart.score, dart.multiplier, dart.raw);
       }
     },
     onTakeout: () => {
       if (gameState && gameState.dartsThrown.length > 0 && !gameState.pendingChoice && !gameState.isFinished) {
-        handleEndTurn();
+        requestTakeoutAdvance();
       }
     },
   });
@@ -169,8 +193,16 @@ export default function KillerPage() {
         </div>
       </div>
 
-      <div className="relative z-10 flex items-center justify-center p-2 overflow-hidden h-full">
-        <div className={`h-full w-full bg-black/60 rounded-[2.5rem] border-4 border-slate-800 shadow-2xl flex flex-col overflow-hidden ${isSolo ? 'max-w-md' : 'max-w-[1300px]'}`}>
+      <div className="relative z-10 flex flex-col items-center justify-center p-2 gap-2 overflow-hidden h-full">
+        <VisitDartsBar
+          darts={gameState.dartsThrown}
+          canUndo={history.length > 0}
+          onUndoLast={handleUndo}
+          awaitingTakeout={isHoldingTurn || gameState.dartsThrown.length >= 3}
+          onNextTurn={handleEndTurn}
+          compact
+        />
+        <div className={`flex-1 min-h-0 w-full bg-black/60 rounded-[2.5rem] border-4 border-slate-800 shadow-2xl flex flex-col overflow-hidden ${isSolo ? 'max-w-md' : 'max-w-[1300px]'}`}>
             {!isSolo && (
               <div className={`bg-[#111] grid items-center text-center py-2 border-b-2 border-yellow-500 ${gridCols}`}>
                 <div className="flex flex-col items-center"><img src={gameState.players[0].avatar_url} className="w-14 h-14 rounded-full border-4 border-yellow-500 object-cover bg-black" /><p className="text-[10px] font-black mt-1 text-yellow-500 uppercase leading-none">{gameState.players[0].username}</p></div>
@@ -207,6 +239,7 @@ export default function KillerPage() {
             dartsThrownCount={gameState.dartsThrown.length}
             lastDarts={gameState.dartsThrown}
             canUndo={history.length > 0}
+            awaitingTakeout={isHoldingTurn || gameState.dartsThrown.length >= 3}
             onUndo={handleUndo}
             onThrow={onHit}
             onEndTurn={handleEndTurn}

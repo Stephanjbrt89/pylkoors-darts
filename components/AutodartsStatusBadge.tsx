@@ -62,12 +62,15 @@ def on_message(ws, raw):
     event = str(data.get("event", ""))
     throws = data.get("throws") or []
 
-    if status == "Takeout" or "Takeout" in event:
-        if not in_takeout and sent_throw_count > 0:
-            in_takeout = True
-            post_event({"type": "TAKEOUT"})
-        if len(throws) == 0:
+    if len(throws) == 0:
+        if sent_throw_count > 0:
             sent_throw_count = 0
+            post_event({"type": "TAKEOUT"})
+        in_takeout = False
+        return
+
+    if status == "Takeout" or "Takeout" in event:
+        in_takeout = True
         return
 
     in_takeout = False

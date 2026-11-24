@@ -48,7 +48,7 @@ export const FightEngine = {
   }),
 
   handleThrow: (state: FightState, dart: Dart): FightState => {
-    if (state.isFinished) return state;
+    if (state.isFinished || state.dartsThrown.length >= 3) return state;
 
     const newState = { ...state, players: state.players.map(p => ({ ...p, sectors: [...p.sectors] })) };
     const currentPlayer = newState.players[newState.currentTurnIndex];
@@ -85,18 +85,23 @@ export const FightEngine = {
       newState.winnerId = alivePlayers[0].id;
     }
 
-    if (newDarts.length === 3) {
-      newState.dartsThrown = [];
-      let nextIdx = (newState.currentTurnIndex + 1) % newState.players.length;
-      while (newState.players[nextIdx].isEliminated && !newState.isFinished) {
-        nextIdx = (nextIdx + 1) % newState.players.length;
-      }
-      newState.currentTurnIndex = nextIdx;
-    } else {
-      newState.dartsThrown = newDarts;
-    }
-
+    newState.dartsThrown = newDarts;
     newState.lastAction = action;
     return newState;
-  }
+  },
+
+  endTurn: (state: FightState): FightState => {
+    if (state.isFinished) return state;
+    let nextIdx = (state.currentTurnIndex + 1) % state.players.length;
+    let guard = 0;
+    while (state.players[nextIdx]?.isEliminated && guard < state.players.length) {
+      nextIdx = (nextIdx + 1) % state.players.length;
+      guard++;
+    }
+    return {
+      ...state,
+      dartsThrown: [],
+      currentTurnIndex: nextIdx,
+    };
+  },
 };

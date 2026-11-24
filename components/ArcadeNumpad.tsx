@@ -9,6 +9,7 @@ interface Props {
   lastDarts?: Dart[];
   dartsStatus?: ('hit' | 'miss' | 'none')[];
   canUndo?: boolean;
+  awaitingTakeout?: boolean;
   onUndo?: () => void;
   onThrow: (score: number, multiplier: number, label: string) => void;
   onEndTurn: () => void;
@@ -23,6 +24,7 @@ export const ArcadeNumpad = ({
   lastDarts = [],
   dartsStatus = [],
   canUndo = false,
+  awaitingTakeout = false,
   onUndo,
   onThrow,
   onEndTurn,
@@ -132,6 +134,12 @@ export const ArcadeNumpad = ({
         return;
       }
 
+      if (key === 'Enter' && pendingNum.length === 0 && (awaitingTakeout || dartsThrownCount >= 3)) {
+        e.preventDefault();
+        onEndTurn();
+        return;
+      }
+
       if ((key === 'Enter' || lower === 's') && pendingNum.length > 0) {
         e.preventDefault();
         handleAction(1);
@@ -212,7 +220,19 @@ export const ArcadeNumpad = ({
               UNDO
             </button>
           )}
-          <button onClick={(e) => { e.stopPropagation(); onEndTurn(); }} className="text-[8px] font-black uppercase text-white/40 hover:text-white border border-white/10 px-2 py-1 rounded">END</button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onEndTurn();
+            }}
+            className={`text-[8px] font-black uppercase px-2.5 py-1 rounded border transition-all ${
+              awaitingTakeout || dartsThrownCount >= 3
+                ? 'text-emerald-200 border-emerald-400/70 bg-emerald-500/25 animate-pulse shadow-[0_0_12px_rgba(16,185,129,0.4)]'
+                : 'text-white/40 hover:text-white border-white/10'
+            }`}
+          >
+            {awaitingTakeout || dartsThrownCount >= 3 ? 'NEXT' : 'END'}
+          </button>
         </div>
       </div>
 

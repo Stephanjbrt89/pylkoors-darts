@@ -12,10 +12,12 @@ import { ArcadeLogo } from '@/components/ArcadeLogo';
 import { GameInfo } from '@/components/GameInfo';
 import { ArcadeNumpad } from '@/components/ArcadeNumpad';
 import { VisualDartboard } from '@/components/VisualDartboard';
+import { VisitDartsBar } from '@/components/VisitDartsBar';
 import { ReactionOverlay } from '@/components/ReactionOverlay';
 import { GooierRoulette } from '@/components/GooierRoulette';
 import { AutodartsStatusBadge } from '@/components/AutodartsStatusBadge';
 import { useAutodarts } from '@/lib/hooks/useAutodarts';
+import { useTurnHold } from '@/lib/hooks/useTurnHold';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
@@ -49,8 +51,42 @@ export default function HalfeertjiesPage() {
     await ArcadeService.saveGameState(matchId, nextState);
   };
 
+  const advanceTurn = async () => {
+    if (!gameState || !matchId || gameState.phase !== 'PLAY' || gameState.isFinished) return;
+    setHistory((prev) => [...prev.slice(-29), gameState]);
+    const nextState = HalfeertjiesEngine.endTurn(gameState);
+
+    if (nextState.phase === 'FINISHED' && nextState.winnerId) {
+      SoundService.play('win');
+      setReactionUrl(GifService.getRandomGifUrl('WINNER'));
+      await MatchService.finishMatch(matchId, nextState.winnerId);
+      await StatsService.updateRecord(
+        'ARCADE_HALFEERTJIES',
+        'HIGHEST_SCORE',
+        nextState.winnerId,
+        nextState.players.find((p) => p.id === nextState.winnerId)!.score,
+        matchId
+      );
+    }
+
+    setGameState(nextState);
+    void ArcadeService.saveGameState(matchId, nextState);
+  };
+
+  const {
+    isHoldingTurn,
+    isHoldingRef,
+    markTurnComplete,
+    cancelTurnHold,
+    requestTakeoutAdvance,
+    advanceImmediately,
+  } = useTurnHold(() => {
+    void advanceTurn();
+  });
+
   const handleUndo = () => {
     if (history.length === 0 || !matchId) return;
+    cancelTurnHold();
     const prevSnap = history[history.length - 1];
     setHistory((prev) => prev.slice(0, -1));
     setGameState(prevSnap);
@@ -60,18 +96,11 @@ export default function HalfeertjiesPage() {
 
   const handleEndTurn = () => {
     if (!gameState || !matchId || gameState.phase !== 'PLAY' || gameState.isFinished) return;
-    setHistory((prev) => [...prev.slice(-29), gameState]);
-    const nextState = {
-      ...gameState,
-      currentTurnIndex: (gameState.currentTurnIndex + 1) % gameState.players.length,
-      dartsThrown: [],
-    };
-    setGameState(nextState);
-    void ArcadeService.saveGameState(matchId, nextState);
+    advanceImmediately();
   };
 
   const handleHit = async (score: number, multiplier: number, label: string) => {
-    if (!gameState || !matchId || gameState.phase !== 'PLAY') return;
+    if (!gameState || !matchId || gameState.phase !== 'PLAY' || isHoldingRef.current || gameState.turnResolved || gameState.dartsThrown.length >= 3) return;
     setHistory((prev) => [...prev.slice(-29), gameState]);
     
     const currentPlayerIdx = gameState.currentTurnIndex;
@@ -80,22 +109,16 @@ export default function HalfeertjiesPage() {
     
     const nextState = HalfeertjiesEngine.handleThrow(gameState, { score, multiplier, raw: label });
 
-    if (nextState.dartsThrown.length === 0 && nextState.phase !== 'ROULETTE') {
-        const updatedPlayer = nextState.players[currentPlayerIdx];
-        if (updatedPlayer.score < oldScore) {
-            SoundService.play('bust');
-            setReactionUrl(GifService.getRandomGifUrl('BUST'));
-        } else if (['TARGET_SCORE', 'ANY_TRIPLE', 'ANY_DOUBLE', 'BULL'].includes(String(currentTarget.type))) {
-            SoundService.play('180');
-            setReactionUrl(GifService.getRandomGifUrl('BOOM'));
-        }
-    }
-
-    if (nextState.phase === 'FINISHED' && nextState.winnerId) {
-        SoundService.play('win');
-        setReactionUrl(GifService.getRandomGifUrl('WINNER'));
-        await MatchService.finishMatch(matchId, nextState.winnerId);
-        await StatsService.updateRecord('ARCADE_HALFEERTJIES', 'HIGHEST_SCORE', nextState.winnerId, nextState.players.find(p => p.id === nextState.winnerId)!.score, matchId);
+    if (nextState.turnResolved) {
+      const updatedPlayer = nextState.players[currentPlayerIdx];
+      if (updatedPlayer.score < oldScore) {
+        SoundService.play('bust');
+        setReactionUrl(GifService.getRandomGifUrl('BUST'));
+      } else if (['TARGET_SCORE', 'ANY_TRIPLE', 'ANY_DOUBLE', 'BULL'].includes(String(currentTarget.type))) {
+        SoundService.play('180');
+        setReactionUrl(GifService.getRandomGifUrl('BOOM'));
+      }
+      markTurnComplete();
     }
 
     setGameState(nextState);
@@ -106,11 +129,13 @@ export default function HalfeertjiesPage() {
     enabled: !!matchId && gameState?.phase === 'PLAY' && !gameState?.isFinished,
     matchId: matchId || undefined,
     onThrow: (dart) => {
-      void handleHit(dart.score, dart.multiplier, dart.raw);
+      if (!isHoldingRef.current && (!gameState || (!gameState.turnResolved && gameState.dartsThrown.length < 3))) {
+        void handleHit(dart.score, dart.multiplier, dart.raw);
+      }
     },
     onTakeout: () => {
       if (gameState && gameState.dartsThrown.length > 0 && !gameState.isFinished) {
-        handleEndTurn();
+        requestTakeoutAdvance();
       }
     },
   });
@@ -162,37 +187,53 @@ export default function HalfeertjiesPage() {
         ))}
       </div>
 
-      <div className="flex-grow flex flex-col items-center justify-center p-4 overflow-hidden relative">
-        <div className={`grid gap-4 w-full max-w-7xl mb-6 transition-all duration-700 ${isPadExpanded ? 'scale-90 opacity-40' : 'scale-100'} ${gameState.players.length <= 2 ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-4'}`}>
+      <div className="flex-grow flex flex-col items-center justify-center p-3 gap-2 overflow-hidden relative">
+        <div className={`grid gap-3 w-full max-w-7xl mb-1 transition-all duration-700 ${isPadExpanded ? 'scale-95 opacity-60' : 'scale-100'} ${gameState.players.length <= 2 ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-4'}`}>
             {gameState.players.map((p, idx) => (
-            <div key={p.id} className={`p-4 rounded-[2rem] border-4 transition-all duration-500 ${
+            <div key={p.id} className={`p-3 rounded-[1.75rem] border-4 transition-all duration-500 ${
                 idx === gameState.currentTurnIndex && gameState.phase === 'PLAY' ? 'border-yellow-500 bg-yellow-500/5 shadow-2xl scale-105' : 'border-slate-900 opacity-40'
             }`}>
-                <div className="flex items-center gap-4">
-                <img src={p.avatar_url} className="w-14 h-14 rounded-full border-2 border-white/20 object-cover bg-black shadow-lg" alt="" />
+                <div className="flex items-center gap-3">
+                <img src={p.avatar_url} className="w-12 h-12 rounded-full border-2 border-white/20 object-cover bg-black shadow-lg" alt="" />
                 <div>
                     <p className="text-[10px] font-black text-yellow-500 leading-none mb-1">{p.username}</p>
-                    <p className="text-4xl font-black tabular-nums tracking-tighter">{p.score}</p>
+                    <p className="text-3xl font-black tabular-nums tracking-tighter">{p.score}</p>
                 </div>
                 </div>
             </div>
             ))}
         </div>
 
-        <div className={`flex flex-row items-center justify-center gap-12 transition-all duration-1000 ${isPadExpanded ? 'scale-90' : 'scale-110 lg:scale-125'}`}>
-            <div className="drop-shadow-[0_0_50px_rgba(0,0,0,1)]">
+        <VisitDartsBar
+          darts={gameState.dartsThrown}
+          showTotal={true}
+          canUndo={history.length > 0}
+          onUndoLast={handleUndo}
+          awaitingTakeout={isHoldingTurn || Boolean(gameState.turnResolved) || gameState.dartsThrown.length >= 3}
+          onNextTurn={handleEndTurn}
+          compact
+        />
+
+        <div className="flex flex-row items-center justify-center gap-12 flex-1 min-h-0">
+            <div
+              className={`transition-all duration-500 flex items-center justify-center shrink-0 ${
+                isPadExpanded
+                  ? 'h-[min(36vh,340px)] w-[min(36vh,340px)]'
+                  : 'h-[min(48vh,480px)] w-[min(48vh,480px)]'
+              }`}
+            >
                 <VisualDartboard lastDarts={gameState.dartsThrown} highlight={getVisualHighlight()} />
             </div>
             <div className="flex flex-col items-center text-center">
                 <p className="text-xs font-black text-yellow-500 uppercase mb-2 opacity-50 italic">Must Hit</p>
                 <div className="flex flex-row items-center gap-10">
-                    <h2 className="text-[12rem] leading-none font-black italic text-white drop-shadow-[0_0_60px_rgba(250,204,21,0.4)] tabular-nums">
+                    <h2 className="text-[10rem] leading-none font-black italic text-white drop-shadow-[0_0_60px_rgba(250,204,21,0.4)] tabular-nums">
                         {currentTarget.value || currentTarget.label}
                     </h2>
                     {remainingForExact !== null && (
-                        <div className="bg-cyan-500/10 border-2 border-cyan-400/50 p-8 rounded-[3rem] shadow-[0_0_50px_rgba(34,211,238,0.2)] animate-pulse">
+                        <div className="bg-cyan-500/10 border-2 border-cyan-400/50 p-6 rounded-[2.5rem] shadow-[0_0_50px_rgba(34,211,238,0.2)] animate-pulse">
                             <p className="text-[10px] font-black text-cyan-400 uppercase tracking-[0.4em] mb-2">Remaining</p>
-                            <p className="text-8xl font-black italic text-white tabular-nums leading-none">{remainingForExact}</p>
+                            <p className="text-7xl font-black italic text-white tabular-nums leading-none">{remainingForExact}</p>
                         </div>
                     )}
                 </div>
@@ -207,6 +248,7 @@ export default function HalfeertjiesPage() {
             dartsThrownCount={gameState.dartsThrown.length}
             lastDarts={gameState.dartsThrown}
             canUndo={history.length > 0}
+            awaitingTakeout={isHoldingTurn || Boolean(gameState.turnResolved) || gameState.dartsThrown.length >= 3}
             onUndo={handleUndo}
             onThrow={handleHit}
             onEndTurn={handleEndTurn}

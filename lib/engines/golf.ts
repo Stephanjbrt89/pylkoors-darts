@@ -66,11 +66,8 @@ export const GolfEngine = {
   }),
 
   handleThrow: (state: GolfState, dart: Dart): GolfState => {
-    if (state.isFinished) return state;
+    if (state.isFinished || state.currentVisitDarts.length >= 3) return state;
     const newDarts = [...state.currentVisitDarts, dart];
-    if (newDarts.length === 3) {
-      return GolfEngine.bankAndAdvance({ ...state, currentVisitDarts: newDarts });
-    }
     return { ...state, currentVisitDarts: newDarts };
   },
 
