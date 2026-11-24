@@ -48,10 +48,13 @@ export default function X01PlayTest() {
   // NEW: Track numpad expansion for board scaling
   const [isPadExpanded, setIsPadExpanded] = useState(false);
 
+  const hasActiveVisitRef = useRef(false);
   const router = useRouter();
 
   const advanceTurn = () => {
     if (!matchId || isWin || activePlayers.length === 0) return;
+    if (!hasActiveVisitRef.current && dartsThrown.length === 0) return;
+    hasActiveVisitRef.current = false;
     const currentPlayer = activePlayers[currentTurnIndex];
     if (dartsThrown.length > 0 && currentPlayer) {
       void MatchService.saveVisit(matchId, currentPlayer.id, dartsThrown, isBustedTurn);
@@ -91,6 +94,7 @@ export default function X01PlayTest() {
     cancelTurnHold();
 
     const prevSnapshot = history[history.length - 1];
+    hasActiveVisitRef.current = prevSnapshot.dartsThrown.length > 0;
     setHistory((prev) => prev.slice(0, -1));
     setCurrentTurnIndex(prevSnapshot.currentTurnIndex);
     setScores(prevSnapshot.scores);
@@ -118,7 +122,7 @@ export default function X01PlayTest() {
       }
     },
     onTakeout: () => {
-      if (matchId && !isWin && dartsThrown.length > 0) {
+      if (matchId && !isWin && hasActiveVisitRef.current && dartsThrown.length > 0) {
         requestTakeoutAdvance();
       }
     },
@@ -159,6 +163,7 @@ export default function X01PlayTest() {
     if (!currentPlayer) return;
 
     pushHistory();
+    hasActiveVisitRef.current = true;
 
     const currentScore = scores[currentPlayer.id];
     const dart: Dart = { score, multiplier, raw: label };
@@ -169,6 +174,7 @@ export default function X01PlayTest() {
 
     if (willWin) {
       cancelTurnHold();
+      hasActiveVisitRef.current = false;
       setIsWin(true);
       setDartsThrown(newDarts);
       setScores(prev => ({ ...prev, [currentPlayer.id]: 0 }));

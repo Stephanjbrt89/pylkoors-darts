@@ -37,6 +37,7 @@ AUTODARTS_WS = os.getenv("AUTODARTS_WS", "ws://127.0.0.1:3180/api/events")
 
 sent_throw_count = 0
 in_takeout = False
+had_throws = False
 
 def post_event(payload):
     payload["boardId"] = BOARD_ID
@@ -50,7 +51,7 @@ def post_event(payload):
         print(f"[BRIDGE] POST error: {e}", flush=True)
 
 def on_message(ws, raw):
-    global sent_throw_count, in_takeout
+    global sent_throw_count, in_takeout, had_throws
     try:
         msg = json.loads(raw)
     except Exception:
@@ -62,31 +63,35 @@ def on_message(ws, raw):
     event = str(data.get("event", ""))
     throws = data.get("throws") or []
 
+    # 1. Only fire TAKEOUT once all darts have actually been removed from the board
     if len(throws) == 0:
-        if sent_throw_count > 0:
+        if had_throws or sent_throw_count > 0:
             sent_throw_count = 0
+            had_throws = False
+            in_takeout = False
             post_event({"type": "TAKEOUT"})
-        in_takeout = False
+        else:
+            in_takeout = False
         return
 
-    if status == "Takeout" or "Takeout" in event:
-        in_takeout = True
-        return
+    # 2. Send newly detected throws first (including dart 3 if Autodarts enters Takeout on the same frame)
+    if not in_takeout:
+        if len(throws) < sent_throw_count:
+            sent_throw_count = len(throws)
+        while sent_throw_count < len(throws):
+            t = throws[sent_throw_count]
+            seg = t.get("segment")
+            seg_name = seg.get("name") if isinstance(seg, dict) else (t.get("segmentName") or seg or "MISS")
+            sent_throw_count += 1
+            had_throws = True
+            post_event({
+                "segment": str(seg_name),
+                "dartIndex": min(sent_throw_count, 3),
+                "coords": t.get("coords"),
+            })
 
-    in_takeout = False
-    if len(throws) < sent_throw_count:
-        sent_throw_count = len(throws)
-
-    while sent_throw_count < len(throws):
-        t = throws[sent_throw_count]
-        seg = t.get("segment")
-        seg_name = seg.get("name") if isinstance(seg, dict) else (t.get("segmentName") or seg or "MISS")
-        sent_throw_count += 1
-        post_event({
-            "segment": str(seg_name),
-            "dartIndex": min(sent_throw_count, 3),
-            "coords": t.get("coords"),
-        })
+    # 3. Lock against phantom throws while physically pulling darts during Takeout
+    in_takeout = (status == "Takeout" or "Takeout" in event)
 
 while True:
     try:
