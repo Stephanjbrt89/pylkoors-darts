@@ -15,17 +15,60 @@ interface Props {
 export const SquadSelect = ({ gameName, minPlayers = 1, maxPlayers = 4, onStart, onCancel }: Props) => {
   const [roster, setRoster] = useState<any[]>([]);
   const [selected, setSelected] = useState<any[]>([]);
+  const [isStarting, setIsStarting] = useState(false);
 
   useEffect(() => {
-    ProfileService.getPlayers().then(setRoster).catch(() => {});
+    let savedPlayer: any = null;
     try {
       const saved = typeof window !== 'undefined' ? localStorage.getItem('pylkoors_player') : null;
       if (saved && saved !== "[object Object]") {
         const p = JSON.parse(saved);
-        if (p && p.username) setSelected([p]);
+        if (p && p.username) {
+          savedPlayer = p;
+          setSelected([p]);
+        }
       }
     } catch {}
+
+    ProfileService.getPlayers()
+      .then((players) => {
+        setRoster(players);
+        if (savedPlayer && players.length > 0) {
+          const match =
+            players.find((r) => String(r.id) === String(savedPlayer.id)) ||
+            players.find((r) => String(r.username).toUpperCase() === String(savedPlayer.username).toUpperCase());
+          if (match) {
+            setSelected([match]);
+            try {
+              localStorage.setItem('pylkoors_player', JSON.stringify(match));
+            } catch {}
+          }
+        }
+      })
+      .catch(() => {});
   }, []);
+
+  const handleConfirmStart = async () => {
+    if (selected.length < minPlayers || isStarting) return;
+    setIsStarting(true);
+    try {
+      const verified = await Promise.all(selected.map((p) => ProfileService.ensurePlayer(p)));
+      try {
+        const saved = typeof window !== 'undefined' ? localStorage.getItem('pylkoors_player') : null;
+        if (saved && verified[0]) {
+          const parsed = JSON.parse(saved);
+          if (String(parsed?.username).toUpperCase() === String(verified[0].username).toUpperCase()) {
+            localStorage.setItem('pylkoors_player', JSON.stringify(verified[0]));
+          }
+        }
+      } catch {}
+      onStart(verified);
+    } catch {
+      onStart(selected);
+    } finally {
+      setIsStarting(false);
+    }
+  };
 
   const togglePlayer = (player: any) => {
     const isAlreadySelected = selected.some(p => String(p.id) === String(player.id));
@@ -104,9 +147,9 @@ export const SquadSelect = ({ gameName, minPlayers = 1, maxPlayers = 4, onStart,
             <button onClick={onCancel} className="order-2 md:order-1 px-12 py-4 rounded-full font-black text-[10px] text-slate-500 uppercase tracking-widest border-2 border-slate-800 hover:text-white hover:border-white transition">
                 BACK TO LOBBY
             </button>
-            <button disabled={selected.length < minPlayers} onClick={() => onStart(selected)}
+            <button disabled={selected.length < minPlayers || isStarting} onClick={handleConfirmStart}
                 className="order-1 md:order-2 px-20 py-5 rounded-[2rem] font-black text-2xl bg-red-600 shadow-[0_0_30px_rgba(220,38,38,0.5)] hover:bg-red-500 transition disabled:opacity-10 uppercase italic">
-                {selected.length === 1 ? 'SOLO RUN' : 'START MATCH'}
+                {isStarting ? 'LOADING...' : selected.length === 1 ? 'SOLO RUN' : 'START MATCH'}
             </button>
         </div>
       </div>

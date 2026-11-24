@@ -3,6 +3,7 @@
 
 import { useState } from 'react';
 import { useAutodarts } from '@/lib/hooks/useAutodarts';
+import { Target, Zap } from 'lucide-react';
 
 export function AutodartsStatusBadge() {
   const { isConnected, lastThrow, lastEventTime, activeBoardId, simulateThrow, simulateTakeout } = useAutodarts();
@@ -80,7 +81,9 @@ requests.post(PYLKOORS_URL, json={"type": "TAKEOUT", "boardId": BOARD_ID})
           <div className="bg-slate-950 border-2 border-cyan-500/30 w-full max-w-xl rounded-3xl p-6 shadow-2xl relative overflow-hidden">
             <div className="flex items-center justify-between pb-4 border-b border-white/10">
               <div className="flex items-center gap-3">
-                <span className="text-2xl">🎯</span>
+                <div className="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400">
+                  <Target className="w-5 h-5" />
+                </div>
                 <div>
                   <h3 className="text-base font-black text-white uppercase tracking-wider">
                     Raspberry Pi Autodarts Bridge
@@ -141,8 +144,8 @@ requests.post(PYLKOORS_URL, json={"type": "TAKEOUT", "boardId": BOARD_ID})
 
               {/* Quick Interactive Throw Simulator */}
               <div className="p-4 rounded-2xl bg-cyan-950/20 border border-cyan-500/20">
-                <p className="text-[10px] font-black uppercase tracking-wider text-cyan-400 mb-2">
-                  ⚡ Throw Pipeline Test Bench
+                <p className="text-[10px] font-black uppercase tracking-wider text-cyan-400 mb-2 flex items-center gap-1.5">
+                  <Zap className="w-3.5 h-3.5" /> Throw Pipeline Test Bench
                 </p>
                 <div className="flex flex-wrap items-center gap-2">
                   {['T20', 'T19', 'D16', 'BULL', '25', 'S20', 'MISS'].map((seg) => (

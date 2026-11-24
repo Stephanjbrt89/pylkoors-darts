@@ -42,19 +42,41 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { username, avatar_url } = body;
+    const { id, username, avatar_url, ensure } = body;
 
     if (!username || typeof username !== 'string') {
       return NextResponse.json({ error: 'Username is required' }, { status: 400 });
     }
 
-    const newId = crypto.randomUUID();
+    const cleanName = username.trim().toUpperCase();
+    const cleanAvatar = avatar_url || '/avatars/1.jpg';
+    const isUuid = typeof id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+
+    if (ensure) {
+      if (isUuid) {
+        const { data: byId } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', id)
+          .maybeSingle();
+        if (byId) return NextResponse.json({ profile: byId });
+      }
+
+      const { data: byName } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('username', cleanName)
+        .maybeSingle();
+      if (byName) return NextResponse.json({ profile: byName });
+    }
+
+    const newId = isUuid ? id : crypto.randomUUID();
     const { data, error } = await supabase
       .from('profiles')
       .insert({
         id: newId,
-        username: username.trim().toUpperCase(),
-        avatar_url: avatar_url || '/avatars/1.jpg',
+        username: cleanName,
+        avatar_url: cleanAvatar,
       })
       .select()
       .single();

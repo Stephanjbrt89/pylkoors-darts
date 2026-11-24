@@ -3,39 +3,44 @@ import { supabase } from '../supabase';
 
 export const ArcadeService = {
   async createMultiplayerMatch(mode: string, playerIds: string[]): Promise<string> {
-    const { data, error } = await supabase
-      .from('matches')
-      .insert({
-        created_by: playerIds[0],
-        category: 'ARCADE',
-        mode: mode,
-        status: 'IN_PROGRESS'
-      })
-      .select()
-      .single();
+    try {
+      const { data, error } = await supabase
+        .from('matches')
+        .insert({
+          created_by: playerIds[0],
+          category: 'ARCADE',
+          mode: mode,
+          status: 'IN_PROGRESS'
+        })
+        .select()
+        .single();
 
-    if (error) {
-      console.error("Match Insert Error:", error.message, error.details); // Improved logging
-      throw error;
+      if (error || !data) {
+        console.warn("Match Insert Error (using local fallback):", error?.message, error?.details);
+        return `local-${crypto.randomUUID()}`;
+      }
+
+      const playerEntries = playerIds.map((id, index) => ({
+        match_id: data.id,
+        player_id: id,
+        player_order: index + 1
+      }));
+
+      const { error: playerError } = await supabase.from('match_players').insert(playerEntries);
+      
+      if (playerError) {
+        console.warn("Player Join Warning:", playerError.message);
+      }
+
+      return data.id;
+    } catch (err: any) {
+      console.warn("Arcade Match Creation Exception (using local fallback):", err?.message);
+      return `local-${crypto.randomUUID()}`;
     }
-
-    const playerEntries = playerIds.map((id, index) => ({
-      match_id: data.id,
-      player_id: id,
-      player_order: index + 1
-    }));
-
-    const { error: playerError } = await supabase.from('match_players').insert(playerEntries);
-    
-    if (playerError) {
-      console.error("Player Join Error:", playerError.message);
-      throw playerError;
-    }
-
-    return data.id;
   },
 
   async saveGameState(matchId: string, state: any) {
+    if (!matchId || matchId.startsWith('local-')) return;
     const { error } = await supabase
       .from('arcade_game_states')
       .upsert({

@@ -99,6 +99,59 @@ export const ProfileService = {
     return fallbackProfile;
   },
 
+  async ensurePlayer(player: { id?: string; username: string; avatar_url?: string }): Promise<PlayerProfile> {
+    const cleanName = String(player.username || 'GOOIER').trim().toUpperCase();
+    const cleanAvatar = player.avatar_url || '/avatars/1.jpg';
+    const isUuid =
+      typeof player.id === 'string' &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(player.id);
+
+    // 1. Try first-party API route with ensure: true
+    try {
+      const res = await fetch('/api/profiles', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: isUuid ? player.id : undefined,
+          username: cleanName,
+          avatar_url: cleanAvatar,
+          ensure: true,
+        }),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.profile) return json.profile;
+      }
+    } catch {}
+
+    // 2. Direct Supabase fallback
+    try {
+      if (isUuid && player.id) {
+        const { data: byId } = await supabase.from('profiles').select('*').eq('id', player.id).maybeSingle();
+        if (byId) return byId;
+      }
+      const { data: byName } = await supabase.from('profiles').select('*').eq('username', cleanName).maybeSingle();
+      if (byName) return byName;
+
+      const { data: inserted } = await supabase
+        .from('profiles')
+        .insert({
+          id: isUuid && player.id ? player.id : crypto.randomUUID(),
+          username: cleanName,
+          avatar_url: cleanAvatar,
+        })
+        .select()
+        .single();
+      if (inserted) return inserted;
+    } catch {}
+
+    return {
+      id: isUuid && player.id ? player.id : crypto.randomUUID(),
+      username: cleanName,
+      avatar_url: cleanAvatar,
+    };
+  },
+
   async deletePlayer(id: string): Promise<void> {
     try {
       const res = await fetch(`/api/profiles?id=${encodeURIComponent(id)}`, { method: 'DELETE' });

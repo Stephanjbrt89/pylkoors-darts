@@ -8,6 +8,19 @@ import Link from 'next/link';
 import { MainLogoBadge } from '../components/MainLogoBadge';
 import { ArcadeLogo } from '../components/ArcadeLogo';
 import { AutodartsStatusBadge } from '../components/AutodartsStatusBadge';
+import {
+  Target,
+  Skull,
+  Shield,
+  Globe,
+  Swords,
+  TrendingDown,
+  Flag,
+  Wine,
+  Trophy,
+  ScrollText,
+  Play,
+} from 'lucide-react';
 
 export default function Home() {
   const [activeMatches, setActiveMatches] = useState<any[]>([]);
@@ -123,16 +136,16 @@ export default function Home() {
             </h3>
             
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-6">
-              <GameCard title="X01 CLASSIC" subtitle="Competitive" color="from-blue-600/40 to-black" link="/play-test" imageText="🎯" />
-              <GameCard title="KILLER TACTICS" subtitle="Elimination" color="from-red-600/40 to-black" link="/killer" imageText="💀" />
-              <GameCard title="BAT & BOWL" subtitle="Cricket" color="from-emerald-500/40 to-black" link="/bat-and-bowl" imageText="🏏" />
-              <GameCard title="ATW JOURNEY" subtitle="Around World" color="from-sky-400/40 to-black" link="/atw" imageText="🌍" />
-              <GameCard title="FIGHT GAME" subtitle="Battle Royale" color="from-red-700/40 to-black" link="/fight" imageText="⚔️" />
-              <GameCard title="HALFEERTJIES" subtitle="South African" color="from-yellow-600/40 to-black" link="/halfeertjies" imageText="📉" />
-              <GameCard title="DARTS GOLF" subtitle="Precision" color="from-emerald-600/40 to-black" link="/golf" imageText="⛳" />
+              <GameCard title="X01 CLASSIC" subtitle="Competitive" color="from-blue-600/40 to-black" link="/play-test" icon={<Target className="w-16 h-16 text-blue-400" strokeWidth={2.2} />} glow="shadow-[0_0_30px_rgba(59,130,246,0.35)] border-blue-500/30" />
+              <GameCard title="KILLER TACTICS" subtitle="Elimination" color="from-red-600/40 to-black" link="/killer" icon={<Skull className="w-16 h-16 text-rose-400" strokeWidth={2.2} />} glow="shadow-[0_0_30px_rgba(244,63,94,0.35)] border-rose-500/30" />
+              <GameCard title="BAT & BOWL" subtitle="Cricket" color="from-emerald-500/40 to-black" link="/bat-and-bowl" icon={<Shield className="w-16 h-16 text-emerald-400" strokeWidth={2.2} />} glow="shadow-[0_0_30px_rgba(16,185,129,0.35)] border-emerald-500/30" />
+              <GameCard title="ATW JOURNEY" subtitle="Around World" color="from-sky-400/40 to-black" link="/atw" icon={<Globe className="w-16 h-16 text-sky-400" strokeWidth={2.2} />} glow="shadow-[0_0_30px_rgba(56,189,248,0.35)] border-sky-400/30" />
+              <GameCard title="FIGHT GAME" subtitle="Battle Royale" color="from-red-700/40 to-black" link="/fight" icon={<Swords className="w-16 h-16 text-red-400" strokeWidth={2.2} />} glow="shadow-[0_0_30px_rgba(239,68,68,0.35)] border-red-500/30" />
+              <GameCard title="HALFEERTJIES" subtitle="South African" color="from-yellow-600/40 to-black" link="/halfeertjies" icon={<TrendingDown className="w-16 h-16 text-yellow-400" strokeWidth={2.2} />} glow="shadow-[0_0_30px_rgba(250,204,21,0.35)] border-yellow-500/30" />
+              <GameCard title="DARTS GOLF" subtitle="Precision" color="from-emerald-600/40 to-black" link="/golf" icon={<Flag className="w-16 h-16 text-emerald-300" strokeWidth={2.2} />} glow="shadow-[0_0_30px_rgba(52,211,153,0.35)] border-emerald-400/30" />
               
               {/* NEW CABINET: BRANDY SPECIAL */}
-              <GameCard title="BRANDY SPECIAL" subtitle="Pub Classic" color="from-amber-600/40 to-black" link="/brandy" imageText="🥃" />
+              <GameCard title="BRANDY SPECIAL" subtitle="Pub Classic" color="from-amber-600/40 to-black" link="/brandy" icon={<Wine className="w-16 h-16 text-amber-400" strokeWidth={2.2} />} glow="shadow-[0_0_30px_rgba(245,158,11,0.35)] border-amber-500/30" />
             </div>
 
             {activeMatches.length > 0 && activePlayer && (
@@ -145,7 +158,7 @@ export default function Home() {
                     <div key={m.id} className="relative flex-shrink-0">
                       <Link href={getMatchLink(m.mode)} className="flex bg-slate-900 border-2 border-slate-800 p-4 rounded-2xl items-center gap-4 hover:border-red-600 transition pr-12 shadow-xl">
                         <div className="w-10 h-10 bg-red-600 rounded-lg flex items-center justify-center font-black italic text-white shadow-md">
-                          {String(m.mode).charAt(7) || '🎯'}
+                          {String(m.mode).charAt(7) || <Target className="w-5 h-5" />}
                         </div>
                         <p className="text-sm font-bold italic uppercase tracking-tighter">
                           {String(m.mode).replace('ARCADE_', '').replace('_', ' ')}
@@ -241,7 +254,7 @@ export default function Home() {
                   ))
                 ) : (
                   <div className="text-center py-16 opacity-30">
-                    <span className="text-3xl block mb-2">🏆</span>
+                    <Trophy className="w-8 h-8 mx-auto mb-2 text-amber-400" />
                     <p className="text-[10px] font-black uppercase tracking-widest leading-tight">Empty Hall</p>
                     <p className="text-[8px] text-slate-500 mt-1">Finish matches to claim the throne</p>
                   </div>
@@ -254,7 +267,7 @@ export default function Home() {
               <div className="absolute -top-24 -left-24 w-64 h-64 bg-cyan-500/10 rounded-full blur-[100px]" />
               <div className="flex items-center justify-between mb-8 relative z-10">
                 <h3 className="text-[11px] font-black text-cyan-400 uppercase tracking-[0.4em] italic flex items-center gap-2">
-                  📜 Bar Records
+                  <ScrollText className="w-4 h-4" /> Bar Records
                 </h3>
                 <span className="text-[9px] font-black uppercase text-cyan-400/70 bg-cyan-500/10 px-3 py-1 rounded-full border border-cyan-500/20">
                   Hall Records
@@ -292,7 +305,7 @@ export default function Home() {
                   </div>
                 )) : (
                   <div className="text-center py-10 opacity-30">
-                    <span className="text-2xl block mb-1">📜</span>
+                    <ScrollText className="w-7 h-7 mx-auto mb-1 text-cyan-400" />
                     <p className="text-[10px] font-black uppercase tracking-widest leading-tight">No House Records</p>
                     <p className="text-[8px] text-slate-500 mt-1">Break records in any game to post here</p>
                   </div>
@@ -307,11 +320,13 @@ export default function Home() {
   );
 }
 
-function GameCard({ title, color, link, imageText, subtitle }: any) {
+function GameCard({ title, color, link, icon, glow, subtitle }: any) {
   return (
     <Link href={link} className="group block relative rounded-[2rem] overflow-hidden border-4 border-slate-900 hover:border-white transition-all duration-500 shadow-2xl h-full flex flex-col min-h-[220px]">
       <div className={`h-40 bg-gradient-to-br ${color} flex items-center justify-center relative overflow-hidden`}>
-        <span className="text-7xl group-hover:scale-125 transition-transform duration-500 drop-shadow-[0_0_25px_rgba(255,255,255,0.4)] select-none">{imageText}</span>
+        <div className={`w-24 h-24 rounded-3xl bg-black/50 border-2 flex items-center justify-center group-hover:scale-110 transition-transform duration-500 ${glow}`}>
+          {icon}
+        </div>
         <div className="absolute top-0 left-0 w-full h-1 bg-white/20 group-hover:bg-white/40 transition-colors" />
       </div>
       <div className="bg-[#111] p-5 flex items-center justify-between border-t border-white/5 flex-grow text-left">
@@ -320,7 +335,7 @@ function GameCard({ title, color, link, imageText, subtitle }: any) {
           <h4 className="text-[14px] font-black italic tracking-tighter uppercase leading-none truncate">{title}</h4>
         </div>
         <div className="w-9 h-9 bg-slate-800 rounded-xl flex items-center justify-center group-hover:bg-white group-hover:text-black transition-all rotate-3 group-hover:rotate-12 flex-shrink-0 ml-2">
-          <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" /></svg>
+          <Play className="w-4 h-4 fill-current" />
         </div>
       </div>
     </Link>

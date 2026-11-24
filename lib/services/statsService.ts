@@ -5,6 +5,7 @@ export type RecordType = 'FEWEST_DARTS' | 'HIGHEST_SCORE' | 'LOWEST_SCORE' | 'HI
 
 export const StatsService = {
   async updateRecord(mode: string, type: RecordType, playerId: string, value: number, matchId: string): Promise<boolean> {
+    if (!matchId || matchId.startsWith('local-')) return false;
     try {
       // FEWEST_DARTS and LOWEST_SCORE: Lower is better.
       const isLowerBetter = type === 'FEWEST_DARTS' || type === 'LOWEST_SCORE';
